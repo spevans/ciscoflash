@@ -1,5 +1,5 @@
 /*
- * $Id: pcmciamtd.c,v 1.25 2002-07-10 12:33:44 spse Exp $
+ * $Id: pcmciamtd.c,v 1.26 2002-07-10 17:53:30 spse Exp $
  *
  * pcmciamtd.c - MTD driver for PCMCIA flash memory cards
  *
@@ -48,7 +48,7 @@ static const int debug = 0;
 
 
 #define DRIVER_DESC	"PCMCIA Flash memory card driver"
-#define DRIVER_VERSION	"$Revision: 1.25 $"
+#define DRIVER_VERSION	"$Revision: 1.26 $"
 
 /* Size of the PCMCIA address space: 26 bits = 64 MB */
 #define MAX_PCMCIA_ADDR	0x4000000
@@ -438,13 +438,13 @@ static void pcmcia_copy_to(struct map_info *map, unsigned long to, const void *f
 
 /*======================================================================
 
-After a card is removed, memory_release() will unregister the
+After a card is removed, pcmciamtd_release() will unregister the
 device, and release the PCMCIA configuration.  If the device is
 still open, this will be postponed until it is closed.
 
 ======================================================================*/
 
-static void memory_release(u_long arg)
+static void pcmciamtd_release(u_long arg)
 {
 	dev_link_t *link = (dev_link_t *)arg;
 	memory_dev_t *dev = NULL;
@@ -610,7 +610,7 @@ static void card_settings(memory_dev_t *dev, dev_link_t *link, int *new_name)
 
 /*======================================================================
 
-memory_config() is scheduled to run after a CARD_INSERTION event
+pcmciamtd_config() is scheduled to run after a CARD_INSERTION event
 is received, to configure the PCMCIA socket, and to make the
 MTD device available to the system.
 
@@ -619,7 +619,7 @@ MTD device available to the system.
 #define CS_CHECK(fn, args...) \
 while ((last_ret=CardServices(last_fn=(fn), args))!=0) goto cs_failed
 
-static void memory_config(dev_link_t *link)
+static void pcmciamtd_config(dev_link_t *link)
 {
 	memory_dev_t *dev = link->priv;
 	struct mtd_info *mtd = NULL;
@@ -634,7 +634,7 @@ static void memory_config(dev_link_t *link)
 	cisinfo_t cisinfo;
 	int new_name = 0;
 
-	DEBUG(3, "memory_config(0x%p)", link);
+	DEBUG(3, "pcmciamtd_config(0x%p)", link);
 
 	/* Configure card */
 	link->state |= DEV_CONFIG;
@@ -694,7 +694,7 @@ static void memory_config(dev_link_t *link)
 
 	if(!dev->win_size) {
 		err("Cant allocate memory window");
-		memory_release((u_long)link);
+		pcmciamtd_release((u_long)link);
 		return;
 	}
 	DEBUG(1, "Allocated a window of %dKB", dev->win_size >> 10);
@@ -706,7 +706,7 @@ static void memory_config(dev_link_t *link)
 	dev->win_base = ioremap(req.Base, req.Size);
 	if(!dev->win_base) {
 		err("ioremap(%lu, %u) failed", req.Base, req.Size);
-		memory_release((u_long)link);
+		pcmciamtd_release((u_long)link);
 		return;
 	}
 	DEBUG(1, "mapped window dev = %p req.base = 0x%lx base = %p size = 0x%x",
@@ -761,7 +761,7 @@ static void memory_config(dev_link_t *link)
 	
 	if(!mtd) {
 		DEBUG(1, "Cant find an MTD");
-		memory_release((u_long)link);
+		pcmciamtd_release((u_long)link);
 		return;
 	}
 
@@ -803,17 +803,17 @@ static void memory_config(dev_link_t *link)
 		dev->mtd_info = NULL;
 		MOD_DEC_USE_COUNT;
 		err("Couldnt register MTD device");
-		memory_release((u_long)link);
+		pcmciamtd_release((u_long)link);
 		return;
 	}
-	DEBUG(1, "memory_config: mtd added @ %p mtd->priv = %p", mtd, mtd->priv);
+	DEBUG(1, "pcmciamtd_config: mtd added @ %p mtd->priv = %p", mtd, mtd->priv);
 
 	return;
 
  cs_failed:
 	cs_error(link->handle, last_fn, last_ret);
 	err("CS Error, exiting");
-	memory_release((u_long)link);
+	pcmciamtd_release((u_long)link);
 	return;
 }
 
@@ -827,12 +827,12 @@ to talk to the card any more.
 
 ======================================================================*/
 
-static int memory_event(event_t event, int priority,
+static int pcmciamtd_event(event_t event, int priority,
 			event_callback_args_t *args)
 {
 	dev_link_t *link = args->client_data;
 
-	DEBUG(1, "memory_event(0x%06x)", event);
+	DEBUG(1, "pcmciamtd_event(0x%06x)", event);
 	switch (event) {
 	case CS_EVENT_CARD_REMOVAL:
 		DEBUG(2, "EVENT_CARD_REMOVAL");
@@ -843,7 +843,7 @@ static int memory_event(event_t event, int priority,
 	case CS_EVENT_CARD_INSERTION:
 		DEBUG(2, "EVENT_CARD_INSERTION");
 		link->state |= DEV_PRESENT | DEV_CONFIG_PENDING;
-		memory_config(link);
+		pcmciamtd_config(link);
 		break;
 	case CS_EVENT_PM_SUSPEND:
 		DEBUG(2, "EVENT_PM_SUSPEND");
@@ -876,13 +876,13 @@ when the device is released.
 
 ======================================================================*/
 
-static void memory_detach(dev_link_t *link)
+static void pcmciamtd_detach(dev_link_t *link)
 {
 	int ret;
 	memory_dev_t *dev = NULL;
 	struct list_head *temp1, *temp2;
 
-	DEBUG(3, "memory_detach(0x%p)", link);
+	DEBUG(3, "pcmciamtd_detach(0x%p)", link);
 
 	/* Find device in list */
 	list_for_each_safe(temp1, temp2, &dev_list) {
@@ -903,7 +903,7 @@ static void memory_detach(dev_link_t *link)
 	}
 
 	if (link->state & DEV_CONFIG) {
-		//memory_release((u_long)link);
+		//pcmciamtd_release((u_long)link);
 		DEBUG(3, "DEV_CONFIG set");
 		link->state |= DEV_STALE_LINK;
 		return;
@@ -927,30 +927,30 @@ static void memory_detach(dev_link_t *link)
 
 /*======================================================================
 
-memory_attach() creates an "instance" of the driver, allocating
+pcmciamtd_attach() creates an "instance" of the driver, allocating
 local data structures for one device.  The device is registered
 with Card Services.
 
 ======================================================================*/
 
-static dev_link_t *memory_attach(void)
+static dev_link_t *pcmciamtd_attach(void)
 {
 	memory_dev_t *dev;
 	dev_link_t *link;
 	client_reg_t client_reg;
 	int ret;
 
-	DEBUG(2, "memory_attach()");
+	DEBUG(2, "pcmciamtd_attach()");
 
 	/* Create new memory card device */
 	dev = kmalloc(sizeof(*dev), GFP_KERNEL);
 	if (!dev) return NULL;
-	DEBUG(1, "memory_attach: dev = %p", dev);
+	DEBUG(1, "pcmciamtd_attach: dev = %p", dev);
 
 	memset(dev, 0, sizeof(*dev));
 	link = &dev->link; link->priv = dev;
 
-	link->release.function = &memory_release;
+	link->release.function = &pcmciamtd_release;
 	link->release.data = (u_long)link;
 
 	link->conf.Attributes = 0;
@@ -965,14 +965,14 @@ static dev_link_t *memory_attach(void)
 		CS_EVENT_RESET_PHYSICAL | CS_EVENT_CARD_RESET |
 		CS_EVENT_CARD_INSERTION | CS_EVENT_CARD_REMOVAL |
 		CS_EVENT_PM_SUSPEND | CS_EVENT_PM_RESUME;
-	client_reg.event_handler = &memory_event;
+	client_reg.event_handler = &pcmciamtd_event;
 	client_reg.Version = 0x0210;
 	client_reg.event_callback_args.client_data = link;
 	DEBUG(2, "Calling RegisterClient");
 	ret = CardServices(RegisterClient, &link->handle, &client_reg);
 	if (ret != 0) {
 		cs_error(link->handle, RegisterClient, ret);
-		memory_detach(link);
+		pcmciamtd_detach(link);
 		return NULL;
 	}
 
@@ -1005,7 +1005,7 @@ static int __init init_pcmciamtd(void)
 		mem_type = 0;
 	}
 
-	register_pccard_driver(&dev_info, &memory_attach, &memory_detach);
+	register_pccard_driver(&dev_info, &pcmciamtd_attach, &pcmciamtd_detach);
 	return 0;
 }
 
@@ -1019,8 +1019,8 @@ static void __exit exit_pcmciamtd(void)
 	list_for_each_safe(temp1, temp2, &dev_list) {
 		dev_link_t *link =&list_entry(temp1, memory_dev_t, list)->link;
 		if (link && (link->state & DEV_CONFIG)) {
-			memory_release((u_long)link);
-			memory_detach(link);
+			pcmciamtd_release((u_long)link);
+			pcmciamtd_detach(link);
 		}
 	}
 }
