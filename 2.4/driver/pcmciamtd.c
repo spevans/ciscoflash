@@ -1,5 +1,5 @@
 /*
- * $Id: pcmciamtd.c,v 1.31 2002-08-01 20:11:08 spse Exp $
+ * $Id: pcmciamtd.c,v 1.32 2002-08-03 04:45:14 spse Exp $
  *
  * pcmciamtd.c - MTD driver for PCMCIA flash memory cards
  *
@@ -45,14 +45,10 @@ static const int debug = 0;
 
 
 #define DRIVER_DESC	"PCMCIA Flash memory card driver"
-#define DRIVER_VERSION	"$Revision: 1.31 $"
+#define DRIVER_VERSION	"$Revision: 1.32 $"
 
 /* Size of the PCMCIA address space: 26 bits = 64 MB */
 #define MAX_PCMCIA_ADDR	0x4000000
-
-#define PCMCIA_BYTE_MASK(x)  (x-1)
-#define PCMCIA_WORD_MASK(x)  (x-2)
-
 
 struct pcmciamtd_dev {
 	struct list_head list;
@@ -63,6 +59,7 @@ struct pcmciamtd_dev {
 	unsigned int	offset;		/* offset into card the window currently points at */
 	struct map_info	pcmcia_map;
 	struct mtd_info	*mtd_info;
+	u8		vpp;
 	char		mtd_name[sizeof(struct cistpl_vers_1_t)];
 };
 
@@ -81,11 +78,11 @@ static int mem_speed;
 /* Force the size of an SRAM card */
 static int force_size;
 
-/* Force Vcc */
-static int vcc;
-
 /* Force Vpp */
 static int vpp;
+
+/* Set Vpp */
+static int setvpp;
 
 /* Force card to be treated as FLASH, ROM or RAM */
 static int mem_type;
@@ -99,10 +96,10 @@ MODULE_PARM(mem_speed, "i");
 MODULE_PARM_DESC(mem_speed, "Set memory access speed in ns");
 MODULE_PARM(force_size, "i");
 MODULE_PARM_DESC(force_size, "Force size of card in MB (1-64)");
-MODULE_PARM(vcc, "i");
-MODULE_PARM_DESC(vcc, "Set Vcc in 1/10ths eg 33=3.3V 120=12V (Dangerous)");
+MODULE_PARM(setvpp, "i");
+MODULE_PARM_DESC(setvpp, "Set Vpp (0=Never, 1=On writes, 2=Always on, default=0)");
 MODULE_PARM(vpp, "i");
-MODULE_PARM_DESC(vpp, "Set Vpp in 1/10ths eg 33=3.3V 120=12V (Dangerous)");
+MODULE_PARM_DESC(vpp, "Vpp value in 1/10ths eg 33=3.3V 120=12V (Dangerous)");
 MODULE_PARM(mem_type, "i");
 MODULE_PARM_DESC(mem_type, "Set Memory type (0=Flash, 1=RAM, 2=ROM, default=0)");
 
@@ -124,7 +121,7 @@ static caddr_t remap_window(struct map_info *map, unsigned long to)
 	memreq_t mrq;
 	int ret;
 
-	mrq.CardOffset = to & ~PCMCIA_BYTE_MASK(dev->win_size);
+	mrq.CardOffset = to & ~(dev->win_size-1);
 	if(mrq.CardOffset != dev->offset) {
 		DEBUG(2, "Remapping window from 0x%8.8x to 0x%8.8x",
 		      dev->offset, mrq.CardOffset);
@@ -135,7 +132,7 @@ static caddr_t remap_window(struct map_info *map, unsigned long to)
 		}
 		dev->offset = mrq.CardOffset;
 	}
-	return dev->win_base + (to & PCMCIA_BYTE_MASK(dev->win_size));
+	return dev->win_base + (to & (dev->win_size-1));
 }
 
 
@@ -176,7 +173,7 @@ static void pcmcia_copy_from_remap(struct map_info *map, void *to, unsigned long
 
 	DEBUG(3, "to = %p from = %lu len = %u", to, from, len);
 	while(len) {
-		int toread = win_size - (from & PCMCIA_BYTE_MASK(win_size));
+		int toread = win_size - (from & (win_size-1));
 		caddr_t addr;
 
 		if(toread > len)
@@ -225,7 +222,7 @@ static void pcmcia_copy_to_remap(struct map_info *map, unsigned long to, const v
 
 	DEBUG(3, "to = %lu from = %p len = %u", to, from, len);
 	while(len) {
-		int towrite = win_size - (to & PCMCIA_BYTE_MASK(win_size));
+		int towrite = win_size - (to & (win_size-1));
 		caddr_t addr;
 
 		if(towrite > len)
@@ -307,7 +304,19 @@ static void pcmcia_copy_to(struct map_info *map, unsigned long to, const void *f
 static void pcmciamtd_set_vpp(struct map_info *map, int on)
 {
 	struct pcmciamtd_dev *dev = (struct pcmciamtd_dev *)map->map_priv_1;
-	DEBUG(0, "dev = %p on = %d", dev, on);
+	dev_link_t *link = &dev->link;
+	modconf_t mod;
+	int ret;
+
+	mod.Attributes = CONF_VPP1_CHANGE_VALID | CONF_VPP2_CHANGE_VALID;
+	mod.Vcc = 0;
+	mod.Vpp1 = mod.Vpp2 = on ? dev->vpp : 0;
+
+	DEBUG(2, "dev = %p on = %d vpp = %d\n", dev, on, dev->vpp);
+	ret = CardServices(ModifyConfiguration, link->handle, &mod);
+	if(ret != CS_SUCCESS) {
+		cs_error(link->handle, ModifyConfiguration, ret);
+	}
 }
 
 
@@ -459,7 +468,7 @@ static void card_settings(struct pcmciamtd_dev *dev, dev_link_t *link, int *new_
 
 	if(force_size) {
 		dev->pcmcia_map.size = force_size << 20;
-		DEBUG(2, "size fored to %dM", force_size);
+		DEBUG(2, "size forced to %dM", force_size);
 
 	}
 
@@ -522,7 +531,8 @@ static void pcmciamtd_config(dev_link_t *link)
 	dev->pcmcia_map.write8 = pcmcia_write8_remap;
 	dev->pcmcia_map.write16 = pcmcia_write16_remap;
 	dev->pcmcia_map.copy_to = pcmcia_copy_to_remap;
-	dev->pcmcia_map.set_vpp = pcmciamtd_set_vpp;
+	if(setvpp == 1)
+		dev->pcmcia_map.set_vpp = pcmciamtd_set_vpp;
 
 	/* Request a memory window for PCMCIA. Some architeures can map windows upto the maximum
 	   that PCMCIA can support (64Mb) - this is ideal and we aim for a window the size of the
@@ -582,12 +592,17 @@ static void pcmciamtd_config(dev_link_t *link)
 	DEBUG(2, "Getting configuration");
 	CS_CHECK(GetConfigurationInfo, link->handle, &t);
 	DEBUG(2, "Vcc = %d Vpp1 = %d Vpp2 = %d", t.Vcc, t.Vpp1, t.Vpp2);
-	
+	dev->vpp = (vpp) ? vpp : t.Vpp1;
 	link->conf.Attributes = 0;
-	link->conf.Vcc = (vcc) ? vcc : t.Vcc;
-	link->conf.Vpp1 = (vpp) ? vpp : t.Vpp1;
-	link->conf.Vpp2 = (vpp) ? vpp : t.Vpp2;
-	
+	link->conf.Vcc = t.Vcc;
+	if(setvpp == 2) {
+		link->conf.Vpp1 = dev->vpp;
+		link->conf.Vpp2 = dev->vpp;
+	} else {
+		link->conf.Vpp1 = 0;
+		link->conf.Vpp2 = 0;
+	}
+
 	link->conf.IntType = INT_MEMORY;
 	link->conf.ConfigBase = t.ConfigBase;
 	link->conf.Status = t.Status;
@@ -601,13 +616,6 @@ static void pcmciamtd_config(dev_link_t *link)
 	if(ret != CS_SUCCESS) {
 		cs_error(link->handle, RequestConfiguration, ret);
 	}
-#if 0
-	else {
-		DEBUG(2, "Getting configuration");
-		CS_CHECK(GetConfigurationInfo, link->handle, &t);
-		DEBUG(2, "Vcc = %d Vpp1 = %d Vpp2 = %d", t.Vcc, t.Vpp1, t.Vpp2);
-	}
-#endif
 
 	link->dev = NULL;
 	link->state &= ~DEV_CONFIG_PENDING;
