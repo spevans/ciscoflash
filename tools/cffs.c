@@ -1,5 +1,5 @@
 /*
- * $Id: cffs.c,v 1.19 2002-08-03 15:55:54 spse Exp $
+ * $Id: cffs.c,v 1.20 2002-09-17 00:17:17 spse Exp $
  *
  * cffs - cisco flash filesystem tool
  *
@@ -59,10 +59,9 @@ enum options {	none = 0, bad_options, dir, delete, erase, get, put, fsck, help, 
 	
 
 
-// Used by getopt
+/* Used by getopt */
 extern char *optarg;
 extern int optind, opterr, optopt;  
-
 
 
 /* 16bit check sum calculation */
@@ -103,6 +102,7 @@ int file_match(int filecnt, char **files, struct cffs_hdr *header)
 	return 1;
 }
 
+
 int confirm_action(char *action)
 {
 	int ch;
@@ -121,7 +121,6 @@ int confirm_action(char *action)
 	return 0;
 }
 	
-
 
 char *read_file(int fd, struct cffs_hdr *header, int *filelen) 
 {
@@ -288,8 +287,6 @@ int write_header(int fd, struct cffs_hdr *header)
 
 	return 0;
 }
-		
-
 
 
 int put_file(int fd, char *fname, uint32_t magic)
@@ -298,7 +295,7 @@ int put_file(int fd, char *fname, uint32_t magic)
 	int fd2 = -1;
 	char *file = NULL;
 	struct cffs_hdr header;
-
+	char *basename;
 
 	header.magic = magic;
 	header.pos = lseek(fd, 0, SEEK_CUR);
@@ -320,6 +317,12 @@ int put_file(int fd, char *fname, uint32_t magic)
 		return -1;
 	}
 
+	if(!S_ISREG(sinfo.st_mode)) {
+		fprintf(stderr, "Skipping %s, not a file\n", fname);
+		close(fd2);
+		return -1;
+	}
+
 	/* read it in */
 	file = malloc(sinfo.st_size);
 	if(!file) {
@@ -332,6 +335,12 @@ int put_file(int fd, char *fname, uint32_t magic)
 	}
 	close(fd2);
 
+	basename = strrchr(fname, '/');
+	if(!basename)
+		basename = fname;
+	else
+		basename++;
+
 	if(magic == CISCO_CLASSB) {
 		time_t now;
 		header.hdr.cbfh.magic = magic;
@@ -341,7 +350,7 @@ int put_file(int fd, char *fname, uint32_t magic)
 		time(&now);
 		header.hdr.cbfh.date = now;
 		memset(header.hdr.cbfh.name, 0, 48);
-		strncpy(header.hdr.cbfh.name, fname, 48);
+		strncpy(header.hdr.cbfh.name, basename, 48);
 		header.hdr.cbfh.name[47] = '\0';
 	} else {
 		time_t now;
@@ -350,7 +359,7 @@ int put_file(int fd, char *fname, uint32_t magic)
 		header.hdr.cafh.magic = magic;
 		header.hdr.cafh.filenum = 1;
 		memset(header.hdr.cafh.name, 0, 64);
-		strncpy(header.hdr.cafh.name, fname, 64);
+		strncpy(header.hdr.cafh.name, basename, 64);
 		header.hdr.cbfh.name[63] = '\0';
 		header.hdr.cafh.length = sinfo.st_size;
 		header.hdr.cafh.seek = header.pos+sizeof(struct ca_hdr);
@@ -416,8 +425,9 @@ int delete_file(int fd, struct cffs_hdr *header)
 	off_t pos;
 
 	if(header->magic == CISCO_CLASSB) {
-		if(!(header->hdr.cbfh.flags &= ~FLAG_DELETED))
+		if(!(header->hdr.cbfh.flags & FLAG_DELETED)) {
 			return 0;
+		}
 		header->hdr.cbfh.flags &= ~FLAG_DELETED;
 		flag = htons(header->hdr.cbfh.flags);
 		pos = header->pos + 10;
@@ -437,14 +447,18 @@ int delete_file(int fd, struct cffs_hdr *header)
 		perror("lseek: ");
 		return -1;
 	}
-	if(read_header(fd, header) == -1)
+	if(read_header(fd, header) == -1) {
+		fprintf(stderr, "read_header failed\n");
 		return -1;
+	}
 
-	if(!(header->hdr.cbfh.flags &= ~FLAG_DELETED))
+	if(!(header->hdr.cbfh.flags & FLAG_DELETED))
 		return 0;
+	fprintf(stderr, "Failed to delete file %s\n", 
+		(header->magic == CISCO_CLASSB) ? header->hdr.cbfh.name
+		: header->hdr.cafh.name);
 	return -1;
 }
-
 
 
 void dump_header(struct cffs_hdr *header, uint16_t chk)
@@ -486,6 +500,7 @@ int get_dev_info(int fd, struct mtd_info_user *mtd)
 	return 0;
 }	
 
+
 int erase_device(int fd)
 {
 	int blocks, cnt;
@@ -519,6 +534,7 @@ int erase_device(int fd)
 	return 0;
 		
 }
+
 
 void usage()
 {
@@ -562,10 +578,8 @@ enum options parse_opts(int argc, char **argv, char **device, int *filecnt, char
 		argc--;
 		argv++;
 	} else {
-		*device = NULL;		// set to "/dev/mtd/0" to set /dev/mtd/0 as default
+		*device = NULL;	/* set to "/dev/mtd/0" to set /dev/mtd/0 as default */
 	}
-
-
 
 	while(1) {
 		a = getopt_long(argc, argv, short_opts, long_options, NULL);
@@ -617,7 +631,6 @@ enum options parse_opts(int argc, char **argv, char **device, int *filecnt, char
 	}
 
 	/* default option */
-
 	if(option == none)
 		option = dir;
 
@@ -820,8 +833,10 @@ int main(int argc, char **argv)
 					free(p);
 				}
 				if(options == delete) {
-					if(delete_file(fd, &header) == -1)
+					printf("deleting file %s\n",header.hdr.cbfh.name );
+					if(delete_file(fd, &header) == -1) {
 						goto error;
+					}
 				}
 			}
 			if(next_header_pos(fd, &header) == -1)
