@@ -1,0 +1,81 @@
+<!-- $Id -->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+  <head>
+    <title>Cisco Flash File System tool</title>
+  </head>
+
+  <body>
+    <h1>Cisco Flash File System tool</h1>
+	This is a tool for manipulating the flash file system used on Cisco flash memory cards.
+	It requires an MTD driver for the flash cards and so only runs on Linux. There is an
+	appropiate driver <a href="../pcmciamtd/">here</a>.
+	<p>
+	This code is licensed under the GPL v2.
+	
+	<h2>Supported Operations</h2>
+	<li>dir	- list files.
+	<li>delete - mark a file as deleted
+	<li>erase - erase whole flash
+	<li>get - Get a file from flash
+	<li>put - Put a file onto flash
+	<li>fsck - Check file checksums and check blank space is properly erased.
+	
+	<h2>Supported Filesystems</h2>
+	There are different Cisco flash file systems, currently this supports the simplest
+	one fully (as used on 1600 routers).<p>
+	Other file systems will be get added if I get access to images of the cards to decode.
+
+	<h2>Usage</h2>
+<code>
+cffs - cisco flash file system reader<br>
+Version 0.03  (C) Simon Evans 2002 (spse@secret.org.uk)<br>
+
+
+<table>
+<tr><td colspan=3>Usage: cffs &lt;device&gt; &lt;option&gt; [files...]</td><td></td></tr>
+<tr><td width=10%></td><td width=25%>&lt;device&gt;</td><td>MTD Char device (eg /dev/mtd/0)</td></tr>
+<tr><td></td><td>-l, --dir</td><td>List files</td></tr>
+<tr><td></td><td>-d, --delete</td><td>Delete files</td></tr>
+<tr><td></td><td>-e, --erase</td><td>Erase flash</td></tr>
+<tr><td></td><td>-g, --get</td><td>Get files from flash</td></tr>
+<tr><td></td><td>-p, --put</td><td>Put files onto flash</td></tr>
+<tr><td></td><td>-f, --fsck</td><td>Check file system</td></tr>
+<tr><td></td><td>-h, --help</td><td>Usage information</td></tr>
+<tr><td></td><td>-v, --version</td><td>Show version</td></tr>
+</table>
+</code>
+<p>
+<h3>Examples</h3>
+<p>
+Directory Listing
+<p>
+<code>
+% ./cffs /dev/mtd/0 --dir<br>
+       880   &lt;no date&gt;  [5B8E] [FFFF] running-config<br>
+       856   &lt;no date&gt;  [E2DC] [FFFF] startup-config<br>
+%<br>
+</code>
+<p>
+Deleting a file
+<p>
+<code>
+% ./cffs /dev/mtd/0 --delete running-config<br>
+% ./cffs --dir<br>
+	880   &lt;no date&gt;  [5B8E] [FFFE] running-config [deleted]<br>
+	856   &lt;no date&gt;  [E2DC] [FFFF] startup-config<br>
+%<br>
+</code>
+<p>
+
+	<h2>Download</h2>
+	Current Version is 0.03<br><a href="cffs-0.03.tgz">cffs-0.03.tgz</a><br>
+
+    <hr>
+    <address><a href="mailto:spse@secret.org.uk">Simon Evans</a></address>
+<!-- Created: Thu Jul  4 16:28:42 BST 2002 -->
+<!-- hhmts start -->
+Last modified: Thu Jul  4 17:26:47 BST 2002
+<!-- hhmts end -->
+  </body>
+</html>
