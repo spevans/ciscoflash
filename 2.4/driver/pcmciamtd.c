@@ -1,5 +1,5 @@
 /* 
- * $Id: pcmciamtd.c,v 1.9 2002-05-25 01:19:31 spse Exp $
+ * $Id: pcmciamtd.c,v 1.10 2002-05-25 07:55:55 spse Exp $
  *
  * pcmcia_mtd.c - MTD driver for PCMCIA flash memory cards
  *
@@ -42,7 +42,7 @@ MODULE_PARM(pc_debug, "i");
 MODULE_LICENSE("GPL");
 #undef DEBUG
 #define DEBUG(n, args...) if (pc_debug>(n)) printk("pcmcia_mtd:" __FUNCTION__ "(): " args)
-static char *version ="pcmcia_mtd.c $Revision: 1.9 $";
+static char *version ="pcmcia_mtd.c $Revision: 1.10 $";
 #else
 #define DEBUG(n, args...)
 #endif
@@ -65,8 +65,16 @@ static int buswidth = 0;
 
 /* Force Vcc */
 static int vcc = 0;
+
 /* Force Vpp */
 static int vpp = 0;
+
+/* Force card to be treated as ROM */
+static int rom = 0;
+
+/* Force card to be treated as ROM */
+static int ram = 0;
+
 
 MODULE_PARM(word_width, "i");
 MODULE_PARM(mem_speed, "i");
@@ -74,6 +82,8 @@ MODULE_PARM(force_size, "i");
 MODULE_PARM(buswidth, "i");
 MODULE_PARM(vcc, "i");
 MODULE_PARM(vpp, "i");
+MODULE_PARM(rom, "i");
+MODULE_PARM(ram, "i");
 
 
 /*====================================================================*/
@@ -518,17 +528,6 @@ static void memory_config(dev_link_t *link)
 	dev->cardsize = 0;
 	dev->offset = 0;
 
-	/* Dump 256 bytes from card */
-	if(pc_debug > 4) {
-		char *p = dev->Base;
-		for(i = 0; i < 16; i++) {
-			printk("memory_mtd: 0x%4.4x: ", i << 4);
-			for(j = 0; j < 16; j++)
-				printk("0x%2.2x ", readb(p));
-			printk("\n");
-		}
-	}
-
 	DEBUG(1, "Getting configuration\n");
 	CS_CHECK(GetConfigurationInfo, link->handle, &t);
 	DEBUG(1, "Vcc = %d Vpp1 = %d Vpp2 = %d\n", t.Vcc, t.Vpp1, t.Vpp2);
@@ -552,6 +551,20 @@ static void memory_config(dev_link_t *link)
 	DEBUG(1, "Getting configuration\n");
 	CS_CHECK(GetConfigurationInfo, link->handle, &t);
 	DEBUG(1, "Vcc = %d Vpp1 = %d Vpp2 = %d\n", t.Vcc, t.Vpp1, t.Vpp2);
+
+	/* Dump 256 bytes from card */
+	if(pc_debug > 4) {
+		char *p = dev->Base;
+		for(i = 0; i < 16; i++) {
+			printk("memory_mtd: 0x%4.4x: ", i << 4);
+			for(j = 0; j < 8; j++) {
+				printk("0x%2.2x ", readw(p));
+				p += 2;
+			}
+			printk("\n");
+		}
+	}
+
 
 
 	DEBUG(1, "Looking for card regions\n");
@@ -580,20 +593,25 @@ static void memory_config(dev_link_t *link)
     
 	/* Setup the mtd_info struct */
 
-
 	pcmcia_map.map_priv_1 = (unsigned long)dev;
 	pcmcia_map.map_priv_2 = (unsigned long)link->win;
 	DEBUG(1, "map_priv_1 = 0x%lx\n", pcmcia_map.map_priv_1);
 
-	for(i = 0; i < sizeof(probes) / sizeof(char *); i++) {
-		DEBUG(1, "Trying %s\n", probes[i]);
-		mtd = do_map_probe(probes[i], &pcmcia_map);
-		if(mtd) 
-			break;
-	    
-		DEBUG(1, "FAILED: %s\n", probes[i]);
+	if(rom) {
+		mtd = do_map_probe("map_rom", &pcmcia_map);
+	} els if(ram) {
+		mtd = do_map_probe("map_ram", &pcmcia_map);
+	} else {
+		for(i = 0; i < sizeof(probes) / sizeof(char *); i++) {
+			DEBUG(1, "Trying %s\n", probes[i]);
+			mtd = do_map_probe(probes[i], &pcmcia_map);
+			if(mtd) 
+				break;
+			
+			DEBUG(1, "FAILED: %s\n", probes[i]);
+		}
 	}
-
+	
 	if(!mtd) {
 		DEBUG(1, "Cant find an MTD\n");
 		memory_release((u_long)link);
