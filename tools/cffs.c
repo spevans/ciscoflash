@@ -1,5 +1,5 @@
 /*
- * $Id: cffs.c,v 1.12 2002-07-04 12:37:57 spse Exp $
+ * $Id: cffs.c,v 1.13 2002-07-04 13:59:30 spse Exp $
  *
  *
  */
@@ -32,7 +32,7 @@
 #include "../fs/fileheader.h"
 
 
-#define VERSION "0.01"
+#define VERSION "0.02"
 #define COPYRIGHT "(C) Simon Evans 2002 (spse@secret.org.uk)"
 
 enum options {	none = 0, bad_options, dir, delete, erase, get, put, fsck, help, version };
@@ -433,16 +433,24 @@ void dump_header_ext(ciscoflash_filehdr_ext *h)
 }
 
 
+int get_dev_info(int fd, struct mtd_info_user *mtd)
+{
+	if(ioctl(fd, MEMGETINFO, mtd) == -1) {
+		perror("ioctl: MEMGETINFO: ");
+		return -1;
+	}
+	return 0;
+}	
+
 int erase_device(int fd)
 {
 	int blocks, cnt;
 	struct erase_info_user erase;
 	struct mtd_info_user mtd;
 
-	if(ioctl(fd, MEMGETINFO, &mtd) == -1) {
-		perror("ioctl");
+	if(get_dev_info(fd, &mtd) == -1)
 		return -1;
-	}
+
 	printf("Size = %u erase size = %u\n", mtd.size, mtd.erasesize);
 	if(!mtd.size)
 		return -1;
@@ -583,6 +591,96 @@ enum options parse_opts(int argc, char **argv, char **device, int *filecnt, char
 }		
 
 
+int fsck_device(int fd)
+{
+	struct cffs_hdr header;
+	int eof = 0;
+	uint32_t def_magic = 0;
+	struct mtd_info_user mtd;
+	int to_check;
+	uint8_t *blank;
+	off_t curpos;
+	int free_spc, tested = 0, cnt;
+
+#define TEST_BUF_SZ (16<<10)
+
+	if(get_dev_info(fd, &mtd) == -1)
+		return -1;
+
+	while(!eof && read_header(fd, &header) != -1) {
+		int len;
+		char *buf;
+
+		if(header.magic == 0xffffffff) {
+			eof = 1;
+			continue;
+		}
+		if(!def_magic)
+			def_magic = header.magic;
+
+		buf = read_file(fd, &header, &len);
+		if(buf == NULL)
+			return -1;
+
+		switch(header.magic) {
+		case CISCO_FH_MAGIC: {
+			uint16_t chk = calc_chk16(buf, len);
+			printf("[CRC %s] %s \n", (chk == header.hdr.cfh.chksum) ? "OK " : "BAD",
+			       header.hdr.cfh.name);
+
+			break;
+		}
+
+		default:
+			fprintf(stderr, "Bad magic: 0x%8.8X\n", header.magic);
+			free(buf);
+			return -1;
+		}
+		
+		free(buf);
+		if(next_header_pos(fd, &header) == -1)
+			return -1;
+	}
+	curpos = lseek(fd, -4, SEEK_CUR);
+	if(curpos == -1) {
+		perror("lseek: ");
+		return -1;
+	}
+		
+	/* Now check the rest of the flash is blank */
+	free_spc = to_check = (mtd.size - curpos);
+	printf("Free space = %d bytes\n", free_spc);
+	blank = malloc(TEST_BUF_SZ);
+	if(!blank) {
+		perror("malloc: ");
+		return -1;
+	}
+	while(to_check) {
+		int len = (to_check > TEST_BUF_SZ) ? TEST_BUF_SZ : to_check;
+		int red = read(fd, blank, len);
+		if(red != len) {
+			perror("read: ");
+			free(blank);
+			return -1;
+		}
+		for(cnt = 0; cnt < len; cnt++) {
+			if(blank[cnt] != 0xff) {
+				fprintf(stderr, "\nFlash is not blank\n");
+				free(blank);
+				return -1;
+			}
+		}
+		tested += len;
+		to_check -= len;
+		printf("\rChecking free space is blank: %d%% ",
+		       (100*(free_spc-to_check)) /free_spc);
+	}
+	printf("\nFlash is OK\n");
+	free(blank);
+	return 0;
+}
+
+
 int main(int argc, char **argv)
 {
 	char *device;
@@ -594,6 +692,7 @@ int main(int argc, char **argv)
 	enum options options;
 	int filecnt;
 	char **files;
+	uint32_t def_magic = 0;
 			
 	options = parse_opts(argc, argv, &device, &filecnt, &files);
 
@@ -634,6 +733,8 @@ int main(int argc, char **argv)
 
 	if(options == erase) {
 		erase_device(fd);
+	} else if(options == fsck) {
+		fsck_device(fd);
 	} else {
 		while(!eof && read_header(fd, &header) != -1) {
 			int len;
@@ -642,6 +743,9 @@ int main(int argc, char **argv)
 				eof = 1;
 				continue;
 			}
+			if(!def_magic)
+				def_magic = header.magic;
+
 			if(!file_match(filecnt, files, &header)) {
 				if(options == dir || options == get) {
 					p = read_file(fd, &header, &len);
@@ -669,6 +773,9 @@ int main(int argc, char **argv)
 
 	
 	if(options == put) {
+		if(!def_magic)
+			def_magic = CISCO_FH_MAGIC;
+
 		if(lseek(fd, -4, SEEK_CUR) == -1) {
 			perror("lseek");
 			goto error;
