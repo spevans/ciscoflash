@@ -1,5 +1,5 @@
 /*
- * $Id: cffs.c,v 1.17 2002-07-05 11:01:09 spse Exp $
+ * $Id: cffs.c,v 1.18 2002-07-07 14:39:19 spse Exp $
  *
  * cffs - cisco flash filesystem tool
  *
@@ -94,7 +94,7 @@ int file_match(int filecnt, char **files, struct cffs_hdr *header)
 	if(!filecnt)
 		return 0;
 
-	name = header->magic == CISCO_FH_MAGIC ? header->hdr.cfh.name : header->hdr.ecfh.name;
+	name = header->magic == CISCO_CLASSB ? header->hdr.cbfh.name : header->hdr.cafh.name;
 
 	while(filecnt--) {
 		if(!fnmatch(*files, name, 0))
@@ -130,12 +130,12 @@ char *read_file(int fd, struct cffs_hdr *header, int *filelen)
 	
 	*filelen = 0;
 
-	if(header->magic == CISCO_FH_MAGIC) {
-		len = header->hdr.cfh.length;
-		hlen = sizeof(ciscoflash_filehdr);
+	if(header->magic == CISCO_CLASSB) {
+		len = header->hdr.cbfh.length;
+		hlen = sizeof(struct cb_hdr);
 	} else {
-		len = header->hdr.ecfh.length;
-		hlen = sizeof(ciscoflash_filehdr_ext);
+		len = header->hdr.cafh.length;
+		hlen = sizeof(struct ca_hdr);
 	}
 	if(lseek(fd, header->pos+hlen, SEEK_SET) == -1) {
 		perror("lseek: ");
@@ -179,10 +179,10 @@ int next_header_pos(int fd, struct cffs_hdr *header)
 {
 	off_t newpos = 0;
 
-	if(header->magic == CISCO_FH_MAGIC)
-		newpos = sizeof(ciscoflash_filehdr) + header->hdr.cfh.length;
+	if(header->magic == CISCO_CLASSB)
+		newpos = sizeof(struct cb_hdr) + header->hdr.cbfh.length;
 	else
-		newpos = sizeof(ciscoflash_filehdr_ext) + header->hdr.ecfh.length;
+		newpos = sizeof(struct ca_hdr) + header->hdr.cafh.length;
 
 	newpos += header->pos;
 	newpos = (newpos + 3) & ~3;
@@ -208,36 +208,36 @@ int read_header(int fd, struct cffs_hdr *header)
 	
 	header->magic = ntohl(*(uint32_t *)buf);
 
-	if(header->magic == CISCO_FH_MAGIC) {
-		int len = sizeof(ciscoflash_filehdr) - sizeof(header->magic);
+	if(header->magic == CISCO_CLASSB) {
+		int len = sizeof(struct cb_hdr) - sizeof(header->magic);
 		if(read(fd, buf+4, len) < len)
 			return -1;
 
-		header->hdr.cfh.magic = header->magic;
-		header->hdr.cfh.length = ntohl(*(uint32_t *)(buf+4));
-		header->hdr.cfh.chksum = ntohs(*(uint16_t *)(buf+8));
-		header->hdr.cfh.flags = ntohs(*(uint16_t *)(buf+10));
-		header->hdr.cfh.date = ntohl(*(uint32_t *)(buf+12));
-		strncpy(header->hdr.cfh.name, buf+16, 48);
-		header->hdr.cfh.name[47] = '\0';
+		header->hdr.cbfh.magic = header->magic;
+		header->hdr.cbfh.length = ntohl(*(uint32_t *)(buf+4));
+		header->hdr.cbfh.chksum = ntohs(*(uint16_t *)(buf+8));
+		header->hdr.cbfh.flags = ntohs(*(uint16_t *)(buf+10));
+		header->hdr.cbfh.date = ntohl(*(uint32_t *)(buf+12));
+		strncpy(header->hdr.cbfh.name, buf+16, 48);
+		header->hdr.cbfh.name[47] = '\0';
 		return 0;
-	} else if(header->magic == CISCO_FH_EXT_MAGIC) {
-		int len = sizeof(ciscoflash_filehdr_ext) - sizeof(header->magic);
+	} else if(header->magic == CISCO_CLASSA) {
+		int len = sizeof(struct ca_hdr) - sizeof(header->magic);
 		if(read(fd, buf+4, len) < len)
 			return -1;
 
-		header->hdr.ecfh.magic = header->magic;
-		header->hdr.ecfh.filenum = ntohl(*(uint32_t *)(buf+4));
-		strncpy(header->hdr.cfh.name, buf+8, 64);
-		header->hdr.cfh.name[63] = '\0';			
-		header->hdr.ecfh.length = ntohl(*(uint32_t *)(buf+72));
-		header->hdr.ecfh.seek = ntohl(*(uint32_t *)(buf+76));
-		header->hdr.ecfh.crc = ntohl(*(uint32_t *)(buf+80));
-		header->hdr.ecfh.type = ntohl(*(uint32_t *)(buf+84));
-		header->hdr.ecfh.date = ntohl(*(uint32_t *)(buf+88));
-		header->hdr.ecfh.unk = ntohl(*(uint32_t *)(buf+92));
-		header->hdr.ecfh.flag1 = ntohl(*(uint32_t *)(buf+96));
-		header->hdr.ecfh.flag2 = ntohl(*(uint32_t *)(buf+100));
+		header->hdr.cafh.magic = header->magic;
+		header->hdr.cafh.filenum = ntohl(*(uint32_t *)(buf+4));
+		strncpy(header->hdr.cbfh.name, buf+8, 64);
+		header->hdr.cbfh.name[63] = '\0';			
+		header->hdr.cafh.length = ntohl(*(uint32_t *)(buf+72));
+		header->hdr.cafh.seek = ntohl(*(uint32_t *)(buf+76));
+		header->hdr.cafh.crc = ntohl(*(uint32_t *)(buf+80));
+		header->hdr.cafh.type = ntohl(*(uint32_t *)(buf+84));
+		header->hdr.cafh.date = ntohl(*(uint32_t *)(buf+88));
+		header->hdr.cafh.unk = ntohl(*(uint32_t *)(buf+92));
+		header->hdr.cafh.flag1 = ntohl(*(uint32_t *)(buf+96));
+		header->hdr.cafh.flag2 = ntohl(*(uint32_t *)(buf+100));
 		return 0;
 	}
 	return -1;
@@ -251,16 +251,29 @@ int write_header(int fd, struct cffs_hdr *header)
 
 	memset(buf, 0, sizeof(struct cffs_hdr));
 
-	if(header->magic == CISCO_FH_MAGIC) {
-		len = sizeof(ciscoflash_filehdr);
-		*(uint32_t *)(buf) = htonl(header->hdr.cfh.magic);
-		*(uint32_t *)(buf+4) = htonl(header->hdr.cfh.length);
-		*(uint16_t *)(buf+8) = htons(header->hdr.cfh.chksum);
-		*(uint16_t *)(buf+10) = htons(header->hdr.cfh.flags);
-		*(uint32_t *)(buf+12) = htonl(header->hdr.cfh.length);
-		memcpy(buf+16, header->hdr.cfh.name, 48);
+	if(header->magic == CISCO_CLASSB) {
+		len = sizeof(struct cb_hdr);
+		*(uint32_t *)(buf) = htonl(header->hdr.cbfh.magic);
+		*(uint32_t *)(buf+4) = htonl(header->hdr.cbfh.length);
+		*(uint16_t *)(buf+8) = htons(header->hdr.cbfh.chksum);
+		*(uint16_t *)(buf+10) = htons(header->hdr.cbfh.flags);
+		*(uint32_t *)(buf+12) = htonl(header->hdr.cbfh.date);
+		memcpy(buf+16, header->hdr.cbfh.name, 48);
 	} 
-	else if(header->magic == CISCO_FH_EXT_MAGIC) {
+	else if(header->magic == CISCO_CLASSA) {
+		len = sizeof(struct ca_hdr);
+		*(uint32_t *)(buf) = htonl(header->hdr.cafh.magic);
+		*(uint32_t *)(buf+4) = htonl(header->hdr.cafh.filenum);
+		memcpy(buf+8, header->hdr.cafh.name, 64);
+		*(uint32_t *)(buf+72) = htonl(header->hdr.cafh.length);
+		*(uint32_t *)(buf+76) = htonl(header->hdr.cafh.seek);
+		*(uint32_t *)(buf+80) = htonl(header->hdr.cafh.crc);
+		*(uint32_t *)(buf+84) = htonl(header->hdr.cafh.type);
+		*(uint32_t *)(buf+88) = htonl(header->hdr.cafh.date);
+		*(uint32_t *)(buf+92) = htonl(header->hdr.cafh.unk);
+		*(uint32_t *)(buf+96) = htonl(header->hdr.cafh.flag1);
+		*(uint32_t *)(buf+100) = htonl(header->hdr.cafh.flag2);
+		memset(buf+104, 0, sizeof(header->hdr.cafh.pad));
 	}
 	else return -1;
 		
@@ -319,21 +332,36 @@ int put_file(int fd, char *fname, uint32_t magic)
 	}
 	close(fd2);
 
-	if(magic == CISCO_FH_MAGIC) {
+	if(magic == CISCO_CLASSB) {
 		time_t now;
-		header.hdr.cfh.magic = magic;
-		header.hdr.cfh.length = sinfo.st_size;
-		header.hdr.cfh.chksum = calc_chk16(file, sinfo.st_size);
-		header.hdr.cfh.flags = 0xFFFF & ~FLAG_HASDATE;
+		header.hdr.cbfh.magic = magic;
+		header.hdr.cbfh.length = sinfo.st_size;
+		header.hdr.cbfh.chksum = calc_chk16(file, sinfo.st_size);
+		header.hdr.cbfh.flags = 0xFFFF & ~FLAG_HASDATE;
 		time(&now);
-		header.hdr.cfh.date = now;
-		memset(header.hdr.cfh.name, 0, 48);
-		strncpy(header.hdr.cfh.name, fname, 48);
-		header.hdr.cfh.name[47] = '\0';
+		header.hdr.cbfh.date = now;
+		memset(header.hdr.cbfh.name, 0, 48);
+		strncpy(header.hdr.cbfh.name, fname, 48);
+		header.hdr.cbfh.name[47] = '\0';
 	} else {
-		return -1;
-	}
+		time_t now;
+		time(&now);
 
+		header.hdr.cafh.magic = magic;
+		header.hdr.cafh.filenum = 1;
+		memset(header.hdr.cafh.name, 0, 64);
+		strncpy(header.hdr.cafh.name, fname, 64);
+		header.hdr.cbfh.name[63] = '\0';
+		header.hdr.cafh.length = sinfo.st_size;
+		header.hdr.cafh.seek = header.pos+sizeof(struct ca_hdr);
+		header.hdr.cafh.crc = 0;
+		header.hdr.cafh.type = 1;
+		header.hdr.cafh.date = now;
+		header.hdr.cafh.unk = 0;
+		header.hdr.cafh.flag1 = 0xfffffff8;
+		header.hdr.cafh.flag2 = 0xffffffff;
+	}
+	
 	if(write_header(fd, &header) == -1)
 		goto put_err;
 
@@ -357,7 +385,7 @@ int put_file(int fd, char *fname, uint32_t magic)
 
 int get_file(char *buf, int len, struct cffs_hdr *header)
 {
-	char *name = header->magic == CISCO_FH_MAGIC ? header->hdr.cfh.name : header->hdr.ecfh.name;
+	char *name = header->magic == CISCO_CLASSB ? header->hdr.cbfh.name : header->hdr.cafh.name;
 	int fd;
 	
 	/* note - racy */
@@ -387,11 +415,11 @@ int delete_file(int fd, struct cffs_hdr *header)
 	uint16_t flag;
 	off_t pos;
 
-	if(header->magic == CISCO_FH_MAGIC) {
-		if(!(header->hdr.cfh.flags &= ~FLAG_DELETED))
+	if(header->magic == CISCO_CLASSB) {
+		if(!(header->hdr.cbfh.flags &= ~FLAG_DELETED))
 			return 0;
-		header->hdr.cfh.flags &= ~FLAG_DELETED;
-		flag = htons(header->hdr.cfh.flags);
+		header->hdr.cbfh.flags &= ~FLAG_DELETED;
+		flag = htons(header->hdr.cbfh.flags);
 		pos = header->pos + 10;
 	} else {
 		return -1;
@@ -412,7 +440,7 @@ int delete_file(int fd, struct cffs_hdr *header)
 	if(read_header(fd, header) == -1)
 		return -1;
 
-	if(!(header->hdr.cfh.flags &= ~FLAG_DELETED))
+	if(!(header->hdr.cbfh.flags &= ~FLAG_DELETED))
 		return 0;
 	return -1;
 }
@@ -421,7 +449,7 @@ int delete_file(int fd, struct cffs_hdr *header)
 
 void dump_header(struct cffs_hdr *header, uint16_t chk)
 {
-	ciscoflash_filehdr *h = &header->hdr.cfh;
+	struct cb_hdr *h = &header->hdr.cbfh;
 	time_t t = (time_t)h->date;
 	struct tm tm;
 	char timebuf[16];
@@ -439,7 +467,7 @@ void dump_header(struct cffs_hdr *header, uint16_t chk)
 }
 
 
-void dump_header_ext(ciscoflash_filehdr_ext *h)
+void dump_header_ext(struct ca_hdr *h)
 {
 	time_t t = (time_t)h->date;
 	printf("magic: 0x%8.8X filenum: 0x%8.8X name: %s\n", h->magic, h->filenum, h->name);
@@ -640,10 +668,10 @@ int fsck_device(int fd)
 			return -1;
 
 		switch(header.magic) {
-		case CISCO_FH_MAGIC: {
+		case CISCO_CLASSB: {
 			uint16_t chk = calc_chk16(buf, len);
-			printf("[CRC %s] %s \n", (chk == header.hdr.cfh.chksum) ? "OK " : "BAD",
-			       header.hdr.cfh.name);
+			printf("[CRC %s] %s \n", (chk == header.hdr.cbfh.chksum) ? "OK " : "BAD",
+			       header.hdr.cbfh.name);
 
 			break;
 		}
@@ -804,7 +832,7 @@ int main(int argc, char **argv)
 	
 	if(options == put) {
 		if(!def_magic)
-			def_magic = CISCO_FH_MAGIC;
+			def_magic = CISCO_CLASSB;
 
 		if(lseek(fd, -4, SEEK_CUR) == -1) {
 			perror("lseek");
@@ -812,7 +840,7 @@ int main(int argc, char **argv)
 		}
 		while(filecnt--) {
 			printf("Adding file: %s\n", *(files));
-			put_file(fd, *(files++), CISCO_FH_MAGIC);
+			put_file(fd, *(files++), def_magic);
 			if(seek_next_header(fd) == -1)
 				goto error;
 		}
