@@ -8,7 +8,8 @@
 #include <stdint.h>
 #include <sys/types.h>
 #include <sys/stat.h>
-#include <netinet/in.h>
+#include <netinet/in.h> 
+#include <sys/ioctl.h>
 #include <linux/mtd/mtd.h>
 
 #define _GNU_SOURCE
@@ -101,6 +102,54 @@ void dump_header_ext(ciscoflash_filehdr_ext *h)
 }
 
 
+int confirm_action(char *action)
+{
+	int ch;
+	printf("Proceed with %s [Y/n]", action);
+	fflush(stdout);
+	ch = getchar();
+	if(ch == 'Y' || ch == 'y' || ch == '\n')
+		return 1;
+	printf("\n%s aborted\n", action);
+	return 0;
+}
+	
+
+int erase_device(int fd)
+{
+	int blocks, cnt;
+	struct erase_info_user erase;
+	struct mtd_info_user mtd;
+
+	if(ioctl(fd, MEMGETINFO, &mtd) == -1) {
+		perror("ioctl");
+		return -1;
+	}
+	printf("Size = %u erase size = %u\n", mtd.size, mtd.erasesize);
+	if(!mtd.size)
+		return -1;
+
+	blocks =  mtd.size / mtd.erasesize;
+	printf("%d Erase blocks\n", blocks);
+	if(!confirm_action("erase"))
+		return -1;
+
+	erase.start = 0;
+	erase.length = mtd.erasesize;
+	for(cnt = 0; cnt < blocks; cnt++) {
+		printf("\rErasing block %6d/%d", cnt+1, blocks);
+		fflush(stdout);
+		if(ioctl(fd, MEMERASE, &erase) == -1) {
+			fprintf(stderr, "erase failed\n");
+			return -1;
+		} 
+		erase.start += mtd.erasesize;
+	}
+	printf("\n");
+	return 0;
+		
+}
+
 void usage()
 {
 	printf("cffs - cisco flash file system reader\n");
@@ -142,9 +191,9 @@ enum options parse_opts(int argc, char **argv, char **device, int *filecnt, char
 		argv++;
 	} else {
 		*device = NULL;
-		fprintf(stderr, "Error: no device specified\n");
-		return bad_options;
 	}
+
+
 
 	while(1) {
 		a = getopt_long(argc, argv, short_opts, long_options, NULL);
@@ -181,6 +230,14 @@ enum options parse_opts(int argc, char **argv, char **device, int *filecnt, char
 			option = fsck;
 			break;
 
+		case 'h':
+			option = help;
+			break;
+
+		case 'v':
+			option = version;
+			break;
+
 		default:
 			return bad_options;
 			break;
@@ -192,6 +249,12 @@ enum options parse_opts(int argc, char **argv, char **device, int *filecnt, char
 	if(option == none)
 		option = dir;
 
+	/* check if a device is specified for the options that need it */
+
+	if(!*device && (option != help && option != version)) {
+		fprintf(stderr, "Error: no device specified\n");
+		return bad_options;
+	}
 	/* check for any file names given */
 	if(optind < argc) {
 		*files = (argv+optind);
@@ -219,16 +282,27 @@ int main(int argc, char **argv)
 	if(options == bad_options)
 		exit(1);
 
-	if(device)
-		printf("device = %s\n", device);
+	switch(options) {
+	case bad_options:
+		exit(1);
 
-	if(filecnt) {
-		printf("File args: ");
-		while(filecnt--)
-			printf("%s ", *(files++));
-		printf("\n");
+	case help:
+		usage();
+		exit(1);
+		
+	case version:
+		printf("cffs version " VERSION "\n");
+		exit(1);
+		
+	case none:
+		exit(1);
+		
+	default:
+		break;
+
 	}
-	
+		
+
 	fd = open(device, O_RDONLY);
 	if(fd == -1) {
 		fprintf(stderr, "cant open %s: %s\n", device, strerror(errno));
@@ -239,49 +313,52 @@ int main(int argc, char **argv)
 		close(fd);
 		exit(1);
 	}
-	lseek(fd, 0, 0);
 
-	while(!eof && read(fd, &buf, sizeof(magic)) == sizeof(magic)) {
-		int len;
-		magic = (uint32_t *)buf;
-		*magic = ntohl(*magic);
-
-		switch(*magic) {
-		case CISCO_FH_MAGIC:
-			len = sizeof(ciscoflash_filehdr) - sizeof(magic);
-			break;
-
-		case CISCO_FH_EXT_MAGIC:
-			len = sizeof(ciscoflash_filehdr_ext) - sizeof(magic);
-			break;
-
-		case 0xffffffff:
-			printf("End of filesystem\n");
-			eof = 1;
-			continue;
-		}
-
-		if(read(fd, buf+sizeof(*magic), len) == len) {
-			if(*magic == CISCO_FH_MAGIC) {
-				ciscoflash_filehdr *hdr = (ciscoflash_filehdr *)buf;
-				swap_header(hdr);
+	if(options == erase) {
+		erase_device(fd);
+	} else {
+		while(!eof && read(fd, &buf, sizeof(magic)) == sizeof(magic)) {
+			int len;
+			magic = (uint32_t *)buf;
+			*magic = ntohl(*magic);
+			
+			switch(*magic) {
+			case CISCO_FH_MAGIC:
+				len = sizeof(ciscoflash_filehdr) - sizeof(magic);
+				break;
 				
-				p = malloc(hdr->length+1);
-				memset(p, 0, hdr->length+1);
-				if(!p)
-					goto error;
-				if(read(fd, p, hdr->length) != hdr->length)
-					goto error;
-				dump_header(hdr, calc_chk16(p, hdr->length));
-				free(p);
-				lseek(fd, ((hdr->length +3) & ~3) - hdr->length, SEEK_CUR);
-						
+			case CISCO_FH_EXT_MAGIC:
+				len = sizeof(ciscoflash_filehdr_ext) - sizeof(magic);
+				break;
+				
+			case 0xffffffff:
+				printf("End of filesystem\n");
+				eof = 1;
+				continue;
 			}
-			else if(*magic == CISCO_FH_EXT_MAGIC)
-				dump_header_ext((ciscoflash_filehdr_ext *)buf);
+			
+			if(read(fd, buf+sizeof(*magic), len) == len) {
+				if(*magic == CISCO_FH_MAGIC) {
+					ciscoflash_filehdr *hdr = (ciscoflash_filehdr *)buf;
+					swap_header(hdr);
+					
+					p = malloc(hdr->length+1);
+					memset(p, 0, hdr->length+1);
+					if(!p)
+						goto error;
+					if(read(fd, p, hdr->length) != hdr->length)
+						goto error;
+					dump_header(hdr, calc_chk16(p, hdr->length));
+					free(p);
+					lseek(fd, ((hdr->length +3) & ~3) - hdr->length, SEEK_CUR);
+					
+				}
+				else if(*magic == CISCO_FH_EXT_MAGIC)
+					dump_header_ext((ciscoflash_filehdr_ext *)buf);
+			}
 		}
 	}
-	
+
 	close(fd);
 	exit(0);
 
