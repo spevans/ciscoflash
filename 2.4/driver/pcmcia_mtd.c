@@ -1,5 +1,5 @@
 /*
- * $Id: pcmcia_mtd.c,v 1.21 2002-06-30 04:03:35 spse Exp $
+ * $Id: pcmcia_mtd.c,v 1.22 2002-06-30 15:54:42 spse Exp $
  *
  * pcmcia_mtd.c - MTD driver for PCMCIA flash memory cards
  *
@@ -25,7 +25,7 @@
 #include <linux/mtd/map.h>
 
 #define CONFIG_MTD_DEBUG
-#define CONFIG_MTD_DEBUG_VERBOSE 3
+#define CONFIG_MTD_DEBUG_VERBOSE 2
 
 
 #ifdef CONFIG_MTD_DEBUG
@@ -49,9 +49,7 @@ static const int debug = 0;
 
 
 #define DRIVER_DESC	"PCMCIA Flash memory card driver"
-#define DRIVER_VERSION	"$Revision: 1.21 $"
-/* Maximum number of separate memory devices we'll allow */
-#define MAX_DEV		4
+#define DRIVER_VERSION	"$Revision: 1.22 $"
 
 /* Size of the PCMCIA address space: 26 bits = 64 MB */
 #define MAX_PCMCIA_ADDR	0x4000000
@@ -61,6 +59,7 @@ static const int debug = 0;
 
 
 typedef struct memory_dev_t {
+	struct list_head list;
 	dev_link_t	link;		/* PCMCIA link */
 	caddr_t		win_base;	/* ioremapped address of PCMCIA window */
 	unsigned int	win_size;	/* size of window (usually 64K) */
@@ -74,8 +73,7 @@ typedef struct memory_dev_t {
 
 
 static dev_info_t dev_info = "pcmcia_mtd";
-static dev_link_t *dev_table[MAX_DEV] = { NULL, /* ... */ };
-
+static LIST_HEAD(dev_list);
 
 /* Module parameters */
 
@@ -458,20 +456,21 @@ still open, this will be postponed until it is closed.
 static void memory_release(u_long arg)
 {
 	dev_link_t *link = (dev_link_t *)arg;
-	memory_dev_t *dev;
-	int i, ret;
+	memory_dev_t *dev = NULL;
+	int ret;
+	struct list_head *temp1, *temp2;
 
 	DEBUG(3, "memory_release(0x%p)", link);
-
-	/* Find device in table */
-	for (i = 0; i < MAX_DEV; i++)
-		if (dev_table[i] == link) break;
-	if (i == MAX_DEV) {
-		DEBUG(1, "Cant find %p in dev_table", link);
+	/* Find device in list */
+	list_for_each_safe(temp1, temp2, &dev_list) {
+		dev = list_entry(temp1, memory_dev_t, list);
+		if(link == &dev->link)
+			break;
+	}
+	if(link != &dev->link) {
+		DEBUG(1, "Cant find %p in dev_list", link);
 		return;
 	}
-
-	dev = link->priv;
 
 	if(dev) {
 		if(dev->mtd_info) {
@@ -879,21 +878,24 @@ when the device is released.
 
 static void memory_detach(dev_link_t *link)
 {
-	int i, ret;
-	memory_dev_t *dev;
+	int ret;
+	memory_dev_t *dev = NULL;
+	struct list_head *temp1, *temp2;
 
 	DEBUG(3, "memory_detach(0x%p)", link);
 
-	/* Find device in table */
-	for (i = 0; i < MAX_DEV; i++)
-		if (dev_table[i] == link) break;
-	if (i == MAX_DEV) {
-		DEBUG(1, "Cant find %p in dev_table", link);
+	/* Find device in list */
+	list_for_each_safe(temp1, temp2, &dev_list) {
+		dev = list_entry(temp1, memory_dev_t, list);
+		if(link == &dev->link)
+			break;
+	}
+	if(link != &dev->link) {
+		DEBUG(1, "Cant find %p in dev_list", link);
 		return;
 	}
 	
 	del_timer(&link->release);
-	dev = link->priv;
 
 	if(!dev) {
 		DEBUG(3, "dev is NULL");
@@ -914,9 +916,11 @@ static void memory_detach(dev_link_t *link)
 			cs_error(link->handle, DeregisterClient, ret);
 	}
 	DEBUG(3, "Freeing dev (%p)", dev);
-	kfree(dev);
+	list_del(&dev->list);
 	link->priv = NULL;
-	dev_table[i] = NULL;
+	kfree(dev);
+
+
 }
 
 
@@ -934,15 +938,9 @@ static dev_link_t *memory_attach(void)
 	memory_dev_t *dev;
 	dev_link_t *link;
 	client_reg_t client_reg;
-	int i, ret;
+	int ret;
 
 	DEBUG(2, "memory_attach()");
-	for (i = 0; i < MAX_DEV; i++)
-		if (dev_table[i] == NULL) break;
-	if (i == MAX_DEV) {
-		err("no devices available");
-		return NULL;
-	}
 
 	/* Create new memory card device */
 	dev = kmalloc(sizeof(*dev), GFP_KERNEL);
@@ -958,7 +956,7 @@ static dev_link_t *memory_attach(void)
 	link->conf.Attributes = 0;
 	link->conf.IntType = INT_MEMORY;
 
-	dev_table[i] = link;
+	list_add(&dev->list, &dev_list);
 
 	/* Register with Card Services */
 	client_reg.dev_info = &dev_info;
@@ -1014,16 +1012,14 @@ static int __init init_pcmcia_mtd(void)
 
 static void __exit exit_pcmcia_mtd(void)
 {
-	int i;
-	dev_link_t *link;
+	struct list_head *temp1, *temp2;
 
 	DEBUG(1, "unloading");
 	unregister_pccard_driver(&dev_info);
-	for (i = 0; i < MAX_DEV; i++) {
-		link = dev_table[i];
-		if (link) {
-			if (link->state & DEV_CONFIG)
-				memory_release((u_long)link);
+	list_for_each_safe(temp1, temp2, &dev_list) {
+		dev_link_t *link =&list_entry(temp1, memory_dev_t, list)->link;
+		if (link && (link->state & DEV_CONFIG)) {
+			memory_release((u_long)link);
 			memory_detach(link);
 		}
 	}
