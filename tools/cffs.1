@@ -1,0 +1,87 @@
+.\" $Id: cffs.1,v 1.1 2002-07-07 14:38:34 spse Exp $
+.\"
+.TH cffs 1 "Jul 7, 2002" "Version 0.05"
+
+.SH NAME
+cffs \- Cisco Flash File System tool
+
+.SH SYNOPSIS
+.B cffs
+.RB "<device> --dir"
+.br
+.B cffs 
+.RB "<device> --delete FILES..."
+.br
+.B cffs
+.RB "<device> --erase"
+.br
+.B cffs
+.RB "<device> --get [FILES...]"
+.br
+.B cffs
+.RB "<device> --put FILES..."
+.br
+.B cffs
+.RB "<device> --fsck"
+.br
+.B cffs
+.RB "--help"
+.br
+.B cffs
+.RB "--version"
+.SH DESCRIPTION
+cffs is a tool for manipulating Cisco flash file system images stored on removable flash.
+.SH OPTIONS
+.TP
+.B -l, --dir
+List files.
+.TP
+.B -d, --delete
+Delete files matching the list FILES.
+.TP
+.B -e, --erase
+Format the flash, erasing all data.
+.TP
+.B -g, --get
+Get FILES from the flash and save to current directory.
+.TP
+.B -p, --put
+Put FILES onto the flash.
+.TP
+.B -f, --fsck
+Check the file system integrety, checksum all files and check blank area is fully blank.
+.TP
+.B -h, --help
+Show help and exit.
+.TP
+.B -v, --version
+Show version information.
+.TP
+.B <device> must be an MTD char device (eg /dev/mtd/0).
+.SH EXAMPLES
+.PP
+Show listing of file on /dev/mtd/0
+.IP
+cffs /dev/mtd/0 --dir
+.PP
+Get all files from flash
+.IP
+cffs /dev/mtd/0 --get '*'
+.PP
+Put file running-config onto flash
+.IP
+cffs /dev/mtd/0 --put running-config
+.SH FILES
+.IP /proc/mtd
+Lists available MTDs.
+.IP /dev/mtd/*
+MTD character devices.
+.SH NOTES
+Does not support partitions on Class B file systems.
+.br
+Does not support Class A or Class C file systems.
+.SH LICENSE
+cffs is licensed under the GNU Public License v2. See the file
+COPYING in the source for details.
+.SH AUTHOR
+Copyright \(co 2002 Simon Evans <spse@secret.org.uk>.
