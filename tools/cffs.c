@@ -60,17 +60,53 @@ uint16_t calc_chk16(uint8_t *buf, int len)
 }
 
 
-void swap_header(ciscoflash_filehdr *h)
+int read_header(int fd, struct cffs_hdr *header)
 {
-	h->length = ntohl(h->length);
-	h->chksum = ntohs(h->chksum);
-	h->flags = ntohs(h->flags);
-	h->date = ntohl(h->date);
+	char buf[sizeof(struct cffs_hdr)];
+
+	memset(buf, 0, sizeof(struct cffs_hdr));
+	if(read(fd, &buf, sizeof(header->magic)) < sizeof(header->magic))
+		return -1;
+	
+	header->magic = ntohl(*(uint32_t *)buf);
+
+	if(header->magic == CISCO_FH_MAGIC) {
+		int len = sizeof(ciscoflash_filehdr) - sizeof(header->magic);
+		if(read(fd, buf+4, len) < len)
+			return -1;
+
+		header->hdr.cfh.length = ntohl(*(uint32_t *)(buf+4));
+		header->hdr.cfh.chksum = ntohs(*(uint16_t *)(buf+8));
+		header->hdr.cfh.flags = ntohs(*(uint16_t *)(buf+10));
+		header->hdr.cfh.date = ntohl(*(uint32_t *)(buf+12));
+		strncpy(header->hdr.cfh.name, buf+16, 48);
+		header->hdr.cfh.name[47] = '\0';
+		return 0;
+	} else if(header->magic == CISCO_FH_EXT_MAGIC) {
+		int len = sizeof(ciscoflash_filehdr_ext) - sizeof(header->magic);
+		if(read(fd, buf+4, len) < len)
+			return -1;
+
+		header->hdr.ecfh.filenum = ntohl(*(uint32_t *)(buf+4));
+		strncpy(header->hdr.cfh.name, buf+8, 64);
+		header->hdr.cfh.name[63] = '\0';			
+		header->hdr.ecfh.length = ntohl(*(uint32_t *)(buf+72));
+		header->hdr.ecfh.seek = ntohl(*(uint32_t *)(buf+76));
+		header->hdr.ecfh.crc = ntohl(*(uint32_t *)(buf+80));
+		header->hdr.ecfh.type = ntohl(*(uint32_t *)(buf+84));
+		header->hdr.ecfh.date = ntohl(*(uint32_t *)(buf+88));
+		header->hdr.ecfh.unk = ntohl(*(uint32_t *)(buf+92));
+		header->hdr.ecfh.flag1 = ntohl(*(uint32_t *)(buf+96));
+		header->hdr.ecfh.flag2 = ntohl(*(uint32_t *)(buf+100));
+		return 0;
+	}
+	return -1;
 }
 
 
-void dump_header(ciscoflash_filehdr *h, uint16_t chk)
+void dump_header(struct cffs_hdr *header, uint16_t chk)
 {
+	ciscoflash_filehdr *h = &header->hdr.cfh;
 	time_t t = (time_t)h->date;
 	struct tm tm;
 	char timebuf[16];
@@ -190,7 +226,7 @@ enum options parse_opts(int argc, char **argv, char **device, int *filecnt, char
 		argc--;
 		argv++;
 	} else {
-		*device = NULL;
+		*device = "/dev/mtd/0";
 	}
 
 
@@ -269,8 +305,7 @@ int main(int argc, char **argv)
 	char *device;
 	int fd = -1;
 	struct stat sinfo;
-	uint32_t *magic;
-	char buf[sizeof(ciscoflash_filehdr_ext)];
+	struct cffs_hdr header;
 	char *p;
 	int eof = 0;
 	enum options options;
@@ -317,45 +352,25 @@ int main(int argc, char **argv)
 	if(options == erase) {
 		erase_device(fd);
 	} else {
-		while(!eof && read(fd, &buf, sizeof(magic)) == sizeof(magic)) {
+		while(!eof && read_header(fd, &header) != -1) {
 			int len;
-			magic = (uint32_t *)buf;
-			*magic = ntohl(*magic);
-			
-			switch(*magic) {
-			case CISCO_FH_MAGIC:
-				len = sizeof(ciscoflash_filehdr) - sizeof(magic);
-				break;
-				
-			case CISCO_FH_EXT_MAGIC:
-				len = sizeof(ciscoflash_filehdr_ext) - sizeof(magic);
-				break;
-				
-			case 0xffffffff:
+			if(header.magic == 0xffffffff) {
 				printf("End of filesystem\n");
 				eof = 1;
 				continue;
 			}
-			
-			if(read(fd, buf+sizeof(*magic), len) == len) {
-				if(*magic == CISCO_FH_MAGIC) {
-					ciscoflash_filehdr *hdr = (ciscoflash_filehdr *)buf;
-					swap_header(hdr);
-					
-					p = malloc(hdr->length+1);
-					memset(p, 0, hdr->length+1);
-					if(!p)
-						goto error;
-					if(read(fd, p, hdr->length) != hdr->length)
-						goto error;
-					dump_header(hdr, calc_chk16(p, hdr->length));
-					free(p);
-					lseek(fd, ((hdr->length +3) & ~3) - hdr->length, SEEK_CUR);
-					
-				}
-				else if(*magic == CISCO_FH_EXT_MAGIC)
-					dump_header_ext((ciscoflash_filehdr_ext *)buf);
-			}
+			len = (header.magic == CISCO_FH_MAGIC) ? header.hdr.cfh.length : 
+				header.hdr.ecfh.length;
+
+			p = malloc(len);
+			//memset(p, 0, len);
+			if(!p)
+				goto error;
+			if(read(fd, p, len) != len)
+				goto error;
+			dump_header(&header, calc_chk16(p, len));
+			free(p);
+			lseek(fd, ((len +3) & ~3) - len, SEEK_CUR);
 		}
 	}
 
