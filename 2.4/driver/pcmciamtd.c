@@ -1,5 +1,5 @@
 /*
- * $Id: pcmciamtd.c,v 1.30 2002-08-01 14:16:30 spse Exp $
+ * $Id: pcmciamtd.c,v 1.31 2002-08-01 20:11:08 spse Exp $
  *
  * pcmciamtd.c - MTD driver for PCMCIA flash memory cards
  *
@@ -45,7 +45,7 @@ static const int debug = 0;
 
 
 #define DRIVER_DESC	"PCMCIA Flash memory card driver"
-#define DRIVER_VERSION	"$Revision: 1.30 $"
+#define DRIVER_VERSION	"$Revision: 1.31 $"
 
 /* Size of the PCMCIA address space: 26 bits = 64 MB */
 #define MAX_PCMCIA_ADDR	0x4000000
@@ -54,18 +54,17 @@ static const int debug = 0;
 #define PCMCIA_WORD_MASK(x)  (x-2)
 
 
-typedef struct memory_dev_t {
+struct pcmciamtd_dev {
 	struct list_head list;
 	dev_link_t	link;		/* PCMCIA link */
 	caddr_t		win_base;	/* ioremapped address of PCMCIA window */
 	unsigned int	win_size;	/* size of window */
 	unsigned int	cardsize;	/* size of whole card */
 	unsigned int	offset;		/* offset into card the window currently points at */
-	unsigned int	memspeed;	/* memory access speed in ns */
 	struct map_info	pcmcia_map;
 	struct mtd_info	*mtd_info;
 	char		mtd_name[sizeof(struct cistpl_vers_1_t)];
-} memory_dev_t;
+};
 
 
 static dev_info_t dev_info = "pcmciamtd";
@@ -120,7 +119,7 @@ static void inline cs_error(client_handle_t handle, int func, int ret)
 
 static caddr_t remap_window(struct map_info *map, unsigned long to)
 {
-	memory_dev_t *dev = (memory_dev_t *)map->map_priv_1;
+	struct pcmciamtd_dev *dev = (struct pcmciamtd_dev *)map->map_priv_1;
 	window_handle_t win = (window_handle_t)map->map_priv_2;
 	memreq_t mrq;
 	int ret;
@@ -172,7 +171,7 @@ static u16 pcmcia_read16_remap(struct map_info *map, unsigned long ofs)
 
 static void pcmcia_copy_from_remap(struct map_info *map, void *to, unsigned long from, ssize_t len)
 {
-	memory_dev_t *dev = (memory_dev_t *)map->map_priv_1;
+	struct pcmciamtd_dev *dev = (struct pcmciamtd_dev *)map->map_priv_1;
 	unsigned long win_size = dev->win_size;
 
 	DEBUG(3, "to = %p from = %lu len = %u", to, from, len);
@@ -221,7 +220,7 @@ static void pcmcia_write16_remap(struct map_info *map, u16 d, unsigned long adr)
 
 static void pcmcia_copy_to_remap(struct map_info *map, unsigned long to, const void *from, ssize_t len)
 {
-	memory_dev_t *dev = (memory_dev_t *)map->map_priv_1;
+	struct pcmciamtd_dev *dev = (struct pcmciamtd_dev *)map->map_priv_1;
 	unsigned long win_size = dev->win_size;
 
 	DEBUG(3, "to = %lu from = %p len = %u", to, from, len);
@@ -249,7 +248,7 @@ static void pcmcia_copy_to_remap(struct map_info *map, unsigned long to, const v
 
 static u8 pcmcia_read8(struct map_info *map, unsigned long ofs)
 {
-	caddr_t win_base = (caddr_t)map->map_priv_1;
+	caddr_t win_base = (caddr_t)map->map_priv_2;
 	u8 d;
 
 	d = readb(win_base + ofs);
@@ -260,7 +259,7 @@ static u8 pcmcia_read8(struct map_info *map, unsigned long ofs)
 
 static u16 pcmcia_read16(struct map_info *map, unsigned long ofs)
 {
-	caddr_t win_base = (caddr_t)map->map_priv_1;
+	caddr_t win_base = (caddr_t)map->map_priv_2;
 	u16 d;
 
 	d = readw(win_base + ofs);
@@ -271,17 +270,16 @@ static u16 pcmcia_read16(struct map_info *map, unsigned long ofs)
 
 static void pcmcia_copy_from(struct map_info *map, void *to, unsigned long from, ssize_t len)
 {
-	caddr_t win_base = (caddr_t)map->map_priv_1;
-	unsigned int win_size = map->map_priv_2;
+	caddr_t win_base = (caddr_t)map->map_priv_2;
 
 	DEBUG(3, "to = %p from = %lu len = %u", to, from, len);
-	memcpy_fromio(to, win_base + (from & PCMCIA_BYTE_MASK(win_size)), len);
+	memcpy_fromio(to, win_base + from, len);
 }
 
 
 static void pcmcia_write8(struct map_info *map, u8 d, unsigned long adr)
 {
-	caddr_t win_base = (caddr_t)map->map_priv_1;
+	caddr_t win_base = (caddr_t)map->map_priv_2;
 
 	DEBUG(3, "adr = 0x%08lx (%p)  data = 0x%02x", adr, win_base + adr, d);
 	writeb(d, win_base + adr);
@@ -290,7 +288,7 @@ static void pcmcia_write8(struct map_info *map, u8 d, unsigned long adr)
 
 static void pcmcia_write16(struct map_info *map, u16 d, unsigned long adr)
 {
-	caddr_t win_base = (caddr_t)map->map_priv_1;
+	caddr_t win_base = (caddr_t)map->map_priv_2;
 
 	DEBUG(3, "adr = 0x%08lx (%p)  data = 0x%04x", adr, win_base + adr, d);
 	writew(d, win_base + adr);
@@ -299,11 +297,17 @@ static void pcmcia_write16(struct map_info *map, u16 d, unsigned long adr)
 
 static void pcmcia_copy_to(struct map_info *map, unsigned long to, const void *from, ssize_t len)
 {
-	caddr_t win_base = (caddr_t)map->map_priv_1;
-	unsigned int win_size = map->map_priv_2;
+	caddr_t win_base = (caddr_t)map->map_priv_2;
 
 	DEBUG(3, "to = %lu from = %p len = %u", to, from, len);
-	memcpy_toio(win_base + (to & PCMCIA_BYTE_MASK(win_size)), from, len);
+	memcpy_toio(win_base + to, from, len);
+}
+
+
+static void pcmciamtd_set_vpp(struct map_info *map, int on)
+{
+	struct pcmciamtd_dev *dev = (struct pcmciamtd_dev *)map->map_priv_1;
+	DEBUG(0, "dev = %p on = %d", dev, on);
 }
 
 
@@ -315,14 +319,14 @@ static void pcmcia_copy_to(struct map_info *map, unsigned long to, const void *f
 static void pcmciamtd_release(u_long arg)
 {
 	dev_link_t *link = (dev_link_t *)arg;
-	memory_dev_t *dev = NULL;
+	struct pcmciamtd_dev *dev = NULL;
 	int ret;
 	struct list_head *temp1, *temp2;
 
 	DEBUG(3, "link = 0x%p", link);
 	/* Find device in list */
 	list_for_each_safe(temp1, temp2, &dev_list) {
-		dev = list_entry(temp1, memory_dev_t, list);
+		dev = list_entry(temp1, struct pcmciamtd_dev, list);
 		if(link == &dev->link)
 			break;
 	}
@@ -353,7 +357,7 @@ static void pcmciamtd_release(u_long arg)
 }
 
 
-static void card_settings(memory_dev_t *dev, dev_link_t *link, int *new_name)
+static void card_settings(struct pcmciamtd_dev *dev, dev_link_t *link, int *new_name)
 {
 	int rc;
 	tuple_t tuple;
@@ -485,7 +489,7 @@ while ((last_ret=CardServices(last_fn=(fn), args))!=0) goto cs_failed
 
 static void pcmciamtd_config(dev_link_t *link)
 {
-	memory_dev_t *dev = link->priv;
+	struct pcmciamtd_dev *dev = link->priv;
 	struct mtd_info *mtd = NULL;
 	cs_status_t status;
 	win_req_t req;
@@ -518,6 +522,7 @@ static void pcmciamtd_config(dev_link_t *link)
 	dev->pcmcia_map.write8 = pcmcia_write8_remap;
 	dev->pcmcia_map.write16 = pcmcia_write16_remap;
 	dev->pcmcia_map.copy_to = pcmcia_copy_to_remap;
+	dev->pcmcia_map.set_vpp = pcmciamtd_set_vpp;
 
 	/* Request a memory window for PCMCIA. Some architeures can map windows upto the maximum
 	   that PCMCIA can support (64Mb) - this is ideal and we aim for a window the size of the
@@ -651,8 +656,8 @@ static void pcmciamtd_config(dev_link_t *link)
 	   use the faster non-remapping read/write functions */
 	if(dev->cardsize <= dev->win_size) {
 		DEBUG(1, "Using non remapping memory functions");
-		dev->pcmcia_map.map_priv_1 = (unsigned long)dev->win_base;
-		dev->pcmcia_map.map_priv_2 = (unsigned long)dev->win_size;
+
+		dev->pcmcia_map.map_priv_2 = (unsigned long)dev->win_base;
 		dev->pcmcia_map.read8 = pcmcia_read8;
 		dev->pcmcia_map.read16 = pcmcia_read16;
 		dev->pcmcia_map.copy_from = pcmcia_copy_from;
@@ -737,14 +742,14 @@ static int pcmciamtd_event(event_t event, int priority,
 static void pcmciamtd_detach(dev_link_t *link)
 {
 	int ret;
-	memory_dev_t *dev = NULL;
+	struct pcmciamtd_dev *dev = NULL;
 	struct list_head *temp1, *temp2;
 
 	DEBUG(3, "link=0x%p", link);
 
 	/* Find device in list */
 	list_for_each_safe(temp1, temp2, &dev_list) {
-		dev = list_entry(temp1, memory_dev_t, list);
+		dev = list_entry(temp1, struct pcmciamtd_dev, list);
 		if(link == &dev->link)
 			break;
 	}
@@ -787,7 +792,7 @@ static void pcmciamtd_detach(dev_link_t *link)
 
 static dev_link_t *pcmciamtd_attach(void)
 {
-	memory_dev_t *dev;
+	struct pcmciamtd_dev *dev;
 	dev_link_t *link;
 	client_reg_t client_reg;
 	int ret;
@@ -865,7 +870,7 @@ static void __exit exit_pcmciamtd(void)
 	DEBUG(1, DRIVER_DESC " unloading");
 	unregister_pccard_driver(&dev_info);
 	list_for_each_safe(temp1, temp2, &dev_list) {
-		dev_link_t *link =&list_entry(temp1, memory_dev_t, list)->link;
+		dev_link_t *link = &list_entry(temp1, struct pcmciamtd_dev, list)->link;
 		if (link && (link->state & DEV_CONFIG)) {
 			pcmciamtd_release((u_long)link);
 			pcmciamtd_detach(link);
