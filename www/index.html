@@ -3,72 +3,118 @@
   <head>
     <title>Linux MTD driver for PCMCIA Flash cards</title>
   </head>
-
+  
   <body>
     <h1>Linux MTD driver for PCMCIA Flash cards</h1>
-	This driver allow linear mapped Flash, RAM and ROM based PCMCIA cards to be used under Linux 
-	as MTD devices. It only works with 8 & 16 bit cards (ISA) and not 32bit Cardbus cards.
-	<p>
-	The driver simply maps out the address space of the card and then tries each of the MTD
-	chip probe routines in sequence until it finds a device it understands.
-	<p>
-	<b>NOTE</b> Currently this driver is very alpha software, so please use with caution!
+    This driver allows linear mapped Flash, RAM and ROM based PCMCIA cards to be used under Linux
+    as MTD devices. It only works with 8 & 16 bit cards (ISA) and not 32bit Cardbus cards.
+    <p>
+      The driver simply maps out the address space of the card and then tries each of the MTD
+      chip probe routines in sequence until it finds a device it understands. It is a
+      replacement for the <code>memory_cs</code> module from the pcmcia-cs package but uses the
+      chip drivers from the MTD subsystem, and presents an MTD device rather than block and
+      char devices. A flash filesystem such as jffs2 can then be used on top of it or
+      the <code>mtdblock</code> and <code>mtdchar</code> modules can be used to give more
+      direct access.
+    <p>
+      <b>NOTE</b> Currently this driver is very alpha software, so please use with caution!
 
-	<h3>Setup</h3>
-	Checkout the latest MTD CVS source tree, apply the latest PCMCIA MTD patch (below)
-	and then patch the MTD tree into your Linux source tree.
-	The MTD CVS tree instructions can be found at <a href="http://linux-mtd.infradead.org">
-	linux-mtd.infradead.org</a>
+    <h3>Setup</h3>
+    Checkout the latest MTD CVS source tree, and patch it into your kernel source.
+    Then apply the patch below.<br>
+    The MTD CVS tree instructions can be found at <a href="http://linux-mtd.infradead.org">linux-mtd.infradead.org</a>
+    <p>
+      Then in the Linux kernel configuration under the MTD menu, select 'Mapping drivers for 
+      chip access' and select 'PCMCIA MTD driver' and select the chip drivers as required in 
+      the 'RAM/ROM/Flash chip drivers' section.
+    <p>
+      <b>NOTE</b> The PCMCIA MTD driver has only been tested as a module, so it best to compile it
+      as so.
+    <p>
+      Rebuild and install the modules etc then edit your <code>/etc/pcmcia/config</code> file
+      to add the following:<br>
+      <code>
+	device "pcmciamtd"<br>
+	class "memory" module "pcmciamtd"<br>
+      </code>
+    <p>
+      And for each card type you have bind it to <code>pcmciamtd</code> (by default they are
+      bound to <code>memory_cs</code>) eg:
+    <p>
+      <code>
 
-	To patch the MTD tree into you linux source tree:
-	<code>
-	cd mtd<br>
-	patch -p1 &lt patch-pcmciamtd.diff<br>
-	cd patches<br>
-	sh patchin.sh /path/to/linux/src<br>
-	</code>
-	<p>
-	Then in the Linux kernel configuration under the MTD menu, select 'Mapping drivers for chip access'
-	and select 'PCMCIA MTD driver' and select the chip drivers as required in the
-	'RAM/ROM/Flash chip drivers' section.<br>
-	NOTE. The PCMCIA MTD driver has only been tested as a module, so it best to compile it as so.
-	<p>
-	Rebuild and install the modules etc then edit your /etc/pcmcia/config file to add the following:<br>
-	<code>
-	device "pcmcia_mtd"<br>
-	  class "memory" module "pcmcia_mtd"<br>
-	</code>
-	<p>
-	And for each card type you have bind it to pcmcia_mtd, eg:<br>
-	<code>
 #<br>
 # Memory cards<br>
 #<br>
 card "Anonymous Memory"<br>
   anonymous<br>
-  bind "pcmcia_mtd"<br>
+  bind "pcmciamtd"<br>
 <br>
 card "Memory Card"<br>
   function memory_card<br>
-  bind "pcmcia_mtd"<br>
+  bind "pcmciamtd"<br>
 <br>
 card "IBM 2MB SRAM"<br>
   version "IBM", "2MB SRAM"<br>
-  bind "pcmcia_mtd"<br>
+  bind "pcmciamtd"<br>
 
-	</code>
-	<p>
-	and then restart cardmgr.
-	<p>
-
-
-	<a href="patch-cvsmtd.diff">patch-cvsmtd.diff</a>
-	<a href="patch-cvsmtd.diffstat">(diffstat)</a>
+</code>
+    <p>
+      and then restart cardmgr.
+    <p>
+    <h3>Module Options</h3>
+    If the card has a CIS then this will be read and used to get the parameters for the card.
+    However, a lot of memory cards do not have a CIS so options can be used to override the
+    settings for the card.
+    <p>
+    <table border="1">
+	<tr><td>buswidth</td><td>Set buswidth (1 = 8 bit, 2 = 16 bit, default = 2)</td></tr>
+	<tr><td>mem_speed</td><td>Set memory access speed in ns</td></tr>
+	<tr><td>force_size</td><td>Force size of card in MB (1-64 default = 64)</td></tr>
+	<tr><td>vcc</td><td>Set Vcc in 1/10ths eg 33 = 3.3V 120 = 12V (Dangerous)</td></tr>
+	<tr><td>vpp</td><td>Set Vpp in 1/10ths eg 33 = 3.3V 120 = 12V (Dangerous)</td></tr>
+	<tr><td>mem_type</td><td>Set Memory type (0 = Flash, 1 = RAM, 2 = ROM, default = 0)</td></tr>
+	<tr><td>debug</td><td>Debug level 0 - 5 (default = MTD debug)</td></tr>
+    </table>
+    <p>
+      <code>buswidth</code> sets the memory window into 8 or 16bit mode. By default it uses
+      16bit mode, however the correct usage is dependant on the cards hardware.
+    <p>
+      <code>memspeed</code> sets the access speed of the memory in nanoseconds. This option
+      should not be needed unless the card doesnt work with the default.
+    <p>
+      <code>force_size</code> sets the size of the memory area to search if it cannot be 
+      determined from the CIS. The probe routine looks for flash chips in this area and 
+      may find a smaller flash memory area than was set with <code>force_size.</code>
+    <p>
+      <code>vcc, vpp</code> set the Vcc and Vpp used to power the card optionally for
+      programming the card during write and erase. This is very card specific and some
+      cards can require different Vcc and Vpp voltages. This can be apparent if the card
+      can be read, but not written or erased. Currently the only way to find out the required
+      voltages is to enable debugging in the probe routines and see the model numbers of the
+      chips that are found. The voltages are set in 1/10ths of a volt so to set Vcc to 5.0
+      volts, use <code>vcc=50</code>.
+    <p>
+      <code>mem_type</code> sets the probe routines to call. 0 will use the <i>jedec_probe</i>
+      and <i>cfi_probe</i>. This probe can fail if no supported flash chips are found. Using
+      1 or 2 will always succed as the RAM and ROM probe routines dont actually probe and just
+      return true.
+    <p>
+      <code>debug</code> sets the debug level. This is only compiled in if CONFIG_MTD_DEBUG is
+      set. 0 is quiet, 5 is very noisy.
+    <p>
+      If the card does not appear to work, then try using the <code>memory_cs</code> module.
+      If this works then please report this as a bug (incl as much info as possible about
+      the hardware).
+    <p>
+      Patch against 2.4.19-rc1<br>
+      <a href="patch-2.4.19-rc1-pcmciamtd-1.diff">patch-2.4.19-rc1-pcmciamtd-1.diff</a>
+      <a href="patch-2.4.19-rc1-pcmciamtd-1.diffstat">(diffstat)</a>
     <hr>
     <address><a href="mailto:spse@secret.org.uk">Simon Evans</a></address>
 <!-- Created: Sat Jun  1 17:33:13 BST 2002 -->
 <!-- hhmts start -->
-Last modified: Sat Jun  1 19:16:14 BST 2002
+Last modified: Sun Jun 30 19:53:04 BST 2002
 <!-- hhmts end -->
   </body>
 </html>
