@@ -1,4 +1,4 @@
-# $Id: Makefile,v 1.5 2002-07-07 14:38:18 spse Exp $
+# $Id: Makefile,v 1.6 2002-07-11 12:37:06 spse Exp $
 
 VERSION := 0.05
 CFLAGS := -Wall -O2
@@ -11,7 +11,6 @@ prefix = /usr/local
 exec_prefix = ${prefix}
 bindir = ${exec_prefix}/bin
 mandir = ${prefix}/man
-libdir = ${exec_prefix}/lib/mtsyslogd
 man1dir = $(mandir)/man1
 
 
@@ -28,7 +27,7 @@ install: cffs cffs.1
 tgz:
 	rm -rf cffs-${VERSION}
 	mkdir cffs-${VERSION}
-	cp Makefile cffs.c fileheader.h COPYING README cffs-${VERSION} 
+	cp Makefile cffs.c cffs.1 fileheader.h COPYING README cffs-${VERSION} 
 	tar zcvf cffs-${VERSION}.tgz cffs-${VERSION}
 
 clean:
