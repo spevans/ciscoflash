@@ -1,6 +1,6 @@
 PCMCIA Flash card driver
 CONFIG_MTD_PCMCIA
-  Map driver for accessing PCMCIA linear flash memory cards. These cards are
-  usually around 4-16MB in size. This does not include Compact Flash cards
-  which are treated as IDE devices.
+  Map driver for accessing PCMCIA linear flash memory cards. These cards
+  are usually around 4-16MB in size. This does not include Compact Flash
+  cards which are treated as IDE devices.
 
