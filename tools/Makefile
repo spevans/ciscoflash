@@ -1,6 +1,6 @@
-# $Id: Makefile,v 1.3 2002-07-04 16:32:38 spse Exp $
+# $Id: Makefile,v 1.4 2002-07-04 17:01:50 spse Exp $
 
-VERSION := 0.03
+VERSION := 0.04
 
 all: cffs
 
