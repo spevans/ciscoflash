@@ -1,5 +1,5 @@
 /* 
- * $Id: pcmciamtd.c,v 1.11 2002-05-25 23:44:37 spse Exp $
+ * $Id: pcmciamtd.c,v 1.12 2002-05-26 00:28:04 spse Exp $
  *
  * pcmcia_mtd.c - MTD driver for PCMCIA flash memory cards
  *
@@ -42,7 +42,7 @@ MODULE_PARM(pc_debug, "i");
 MODULE_LICENSE("GPL");
 #undef DEBUG
 #define DEBUG(n, args...) if (pc_debug>(n)) printk("pcmcia_mtd:" __FUNCTION__ "(): " args)
-static char *version ="pcmcia_mtd.c $Revision: 1.11 $";
+static char *version ="pcmcia_mtd.c $Revision: 1.12 $";
 #else
 #define DEBUG(n, args...)
 #endif
@@ -582,12 +582,6 @@ static void memory_config(dev_link_t *link)
 	}
 	DEBUG(1, "Card regions done\n");
     
-#if 0
-	req.Attributes &= ~WIN_MEMORY_TYPE_AM;
-	req.Attributes |= WIN_MEMORY_TYPE_CM;
-	CS_CHECK(ModifyWindow, link->win, &req);
-#endif
-
 	link->dev = NULL;
 	link->state &= ~DEV_CONFIG_PENDING;
     
@@ -631,7 +625,7 @@ static void memory_config(dev_link_t *link)
 		tuple_t tuple;
 		cisparse_t parse;
 		u_char buf[64];
-		tuple.Attributes = 0;
+		tuple.Attributes = TUPLE_RETURN_COMMON;
 		tuple.TupleData = (cisdata_t *)buf;
 		tuple.TupleDataMax = sizeof(buf);
 		tuple.TupleOffset = 0;
@@ -640,27 +634,30 @@ static void memory_config(dev_link_t *link)
 		while(rc == CS_SUCCESS) {
 			CS_CHECK(GetTupleData, link->handle, &tuple);
 			CS_CHECK(ParseTuple, link->handle, &tuple, &parse);
-			DEBUG(1, "memory_mtd: found tuple code: %d\n", tuple.TupleCode);
-			if(tuple.TupleCode == CISTPL_FORMAT) {
+
+			switch(tuple.TupleCode) {
+			case  CISTPL_FORMAT: {
 				cistpl_format_t *t = &parse.format;
-				//dev->minor.offset = parse.format.offset;
 				DEBUG(1, "memory_mtd: Format type: %u, Error Detection: %u, offset = %u, length =%u\n",
 				      t->type, t->edc, t->offset, t->length);
+				break;
 
 			}
-			if(tuple.TupleCode == CISTPL_DEVICE) {
+
+			case CISTPL_DEVICE: {
 				cistpl_device_t *t = &parse.device;
 				int i;
-				DEBUG(1, "memory_mtd: Common memory:\n");
+				DEBUG(1, "Common memory:\n");
 				for(i = 0; i < t->ndev; i++) {
-					DEBUG(1, "memory_mtd: Region %d, type = %u\n", i, t->dev[i].type);
-					DEBUG(1, "memory_mtd: Region %d, wp = %u\n", i, t->dev[i].wp);
-					DEBUG(1, "memory_mtd: Region %d, speed = %u ns\n", i, t->dev[i].speed);
-					DEBUG(1, "memory_mtd: Region %d, size = %u bytes\n", i, t->dev[i].size);
+					DEBUG(1, "Region %d, type = %u\n", i, t->dev[i].type);
+					DEBUG(1, "Region %d, wp = %u\n", i, t->dev[i].wp);
+					DEBUG(1, "Region %d, speed = %u ns\n", i, t->dev[i].speed);
+					DEBUG(1, "Region %d, size = %u bytes\n", i, t->dev[i].size);
 				}
+				break;
 			}
-#if 1
-			if(tuple.TupleCode == CISTPL_VERS_1) {
+
+			case CISTPL_VERS_1: {
 				cistpl_vers_1_t *t = &parse.version_1;
 				int i;
 				if(t->ns) {
@@ -671,28 +668,37 @@ static void memory_config(dev_link_t *link)
 						strcat(mtd->name, t->str+t->ofs[i]);
 					}
 				}
-				DEBUG(1, "\n");
+				DEBUG(1, "Found name: %s\n", mtd->name);
+				break;
 			}
-#endif
-			if(tuple.TupleCode == CISTPL_JEDEC_C) {
+
+			case CISTPL_JEDEC_C: {
 				cistpl_jedec_t *t = &parse.jedec;
 				int i;
 				for(i = 0; i < t->nid; i++) {
-					DEBUG(1, "memory_mtd: JEDEC: 0x%02x 0x%02x\n", t->id[i].mfr, t->id[i].info);
+					DEBUG(1, "JEDEC: 0x%02x 0x%02x\n", t->id[i].mfr, t->id[i].info);
 				}
+				break;
 			}
-			if(tuple.TupleCode == CISTPL_DEVICE_GEO) {
+
+			case CISTPL_DEVICE_GEO: {
 				cistpl_device_geo_t *t = &parse.device_geo;
 				int i;
 				for(i = 0; i < t->ngeo; i++) {
-					DEBUG(1, "memory_mtd: region: %d buswidth = %u\n", i, t->geo[i].buswidth);
-					DEBUG(1, "memory_mtd: region: %d erase_block = %u\n", i, t->geo[i].erase_block);
-					DEBUG(1, "memory_mtd: region: %d read_block = %u\n", i, t->geo[i].read_block);
-					DEBUG(1, "memory_mtd: region: %d write_block = %u\n", i, t->geo[i].write_block);
-					DEBUG(1, "memory_mtd: region: %d partition = %u\n", i, t->geo[i].partition);
-					DEBUG(1, "memory_mtd: region: %d interleave = %u\n", i, t->geo[i].interleave);
+					DEBUG(1, "region: %d buswidth = %u\n", i, t->geo[i].buswidth);
+					DEBUG(1, "region: %d erase_block = %u\n", i, t->geo[i].erase_block);
+					DEBUG(1, "region: %d read_block = %u\n", i, t->geo[i].read_block);
+					DEBUG(1, "region: %d write_block = %u\n", i, t->geo[i].write_block);
+					DEBUG(1, "region: %d partition = %u\n", i, t->geo[i].partition);
+					DEBUG(1, "region: %d interleave = %u\n", i, t->geo[i].interleave);
 				}
+				break;
 			}
+			
+			default:
+				DEBUG(1, "Unknown tuple code %d\n", tuple.TupleCode);
+			}
+				
 			rc = CardServices(GetNextTuple, link->handle, &tuple, &parse);
 		}
 	}
