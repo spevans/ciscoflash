@@ -1,5 +1,5 @@
 /*
- * $Id: cffs.c,v 1.16 2002-07-04 16:29:21 spse Exp $
+ * $Id: cffs.c,v 1.17 2002-07-05 11:01:09 spse Exp $
  *
  * cffs - cisco flash filesystem tool
  *
@@ -37,7 +37,10 @@
 #include <sys/stat.h>
 #include <netinet/in.h> 
 #include <sys/ioctl.h>
+
+#include <linux/kdev_t.h>
 #include <linux/mtd/mtd.h>
+
 
 #define _GNU_SOURCE
 #ifdef HAVE_GETOPT_LONG
@@ -303,7 +306,7 @@ int put_file(int fd, char *fname, uint32_t magic)
 		close(fd2);
 		return -1;
 	}
-	
+
 	/* read it in */
 	file = malloc(sinfo.st_size);
 	if(!file) {
@@ -321,7 +324,7 @@ int put_file(int fd, char *fname, uint32_t magic)
 		header.hdr.cfh.magic = magic;
 		header.hdr.cfh.length = sinfo.st_size;
 		header.hdr.cfh.chksum = calc_chk16(file, sinfo.st_size);
-		header.hdr.cfh.flags = 0xFFFF;
+		header.hdr.cfh.flags = 0xFFFF & ~FLAG_HASDATE;
 		time(&now);
 		header.hdr.cfh.date = now;
 		memset(header.hdr.cfh.name, 0, 48);
@@ -531,7 +534,7 @@ enum options parse_opts(int argc, char **argv, char **device, int *filecnt, char
 		argc--;
 		argv++;
 	} else {
-		*device = "/dev/mtd/0";
+		*device = NULL;		// set to "/dev/mtd/0" to set /dev/mtd/0 as default
 	}
 
 
@@ -707,6 +710,7 @@ int main(int argc, char **argv)
 	int filecnt;
 	char **files;
 	uint32_t def_magic = 0;
+	int mode;
 			
 	options = parse_opts(argc, argv, &device, &filecnt, &files);
 
@@ -733,8 +737,13 @@ int main(int argc, char **argv)
 
 	}
 		
+	/* Determine open mode */
+	if(options == put || options == delete || options == erase)
+		mode = O_RDWR;
+	else
+		mode = O_RDONLY;
 
-	fd = open(device, O_RDWR);
+	fd = open(device, mode);
 	if(fd == -1) {
 		fprintf(stderr, "Bad device %s: %s\n", device, strerror(errno));
 		exit(1);
@@ -745,6 +754,13 @@ int main(int argc, char **argv)
 		exit(1);
 	}
 
+	/* Check it is an MTD char device */
+	if(!S_ISCHR(sinfo.st_mode) || (MAJOR(sinfo.st_rdev) != MTD_CHAR_MAJOR)) {
+		fprintf(stderr, "%s is not an MTD character device\n", device);
+		close(fd);
+		exit(1);
+	}
+	
 	if(options == erase) {
 		erase_device(fd);
 	} else if(options == fsck) {
