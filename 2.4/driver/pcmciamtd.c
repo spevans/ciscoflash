@@ -1,40 +1,15 @@
-/*======================================================================
-
-    A general driver for accessing PCMCIA card memory via Bulk
-    Memory Services.
-
-    This driver provides the equivalent of /dev/mem for a PCMCIA
-    card's attribute and common memory.  It includes character
-    and block device support.
-
-    memory_cs.c 1.80 2001/08/24 12:13:14
-
-    The contents of this file are subject to the Mozilla Public
-    License Version 1.1 (the "License"); you may not use this file
-    except in compliance with the License. You may obtain a copy of
-    the License at http://www.mozilla.org/MPL/
-
-    Software distributed under the License is distributed on an "AS
-    IS" basis, WITHOUT WARRANTY OF ANY KIND, either express or
-    implied. See the License for the specific language governing
-    rights and limitations under the License.
-
-    The initial developer of the original code is David A. Hinds
-    <dahinds@users.sourceforge.net>.  Portions created by David A. Hinds
-    are Copyright (C) 1999 David A. Hinds.  All Rights Reserved.
-
-    Alternatively, the contents of this file may be used under the
-    terms of the GNU General Public License version 2 (the "GPL"), in
-    which case the provisions of the GPL are applicable instead of the
-    above.  If you wish to allow the use of your version of this file
-    only under the terms of the GPL and not to allow others to use
-    your version of this file under the MPL, indicate your decision
-    by deleting the provisions above and replace them with the notice
-    and other provisions required by the GPL.  If you do not delete
-    the provisions above, a recipient may use your version of this
-    file under either the MPL or the GPL.
-    
-======================================================================*/
+/* 
+ * $Id: pcmciamtd.c,v 1.2 2002-05-20 13:49:09 spse Exp $
+ *
+ * pcmcia_mtd.c - MTD driver for PCMCIA flash memory cards
+ *
+ * Author: Simon Evans <spse@secret.org.uk>
+ *
+ * Copyright (C) 2002 Simon Evans
+ * 
+ * Licence: GPL
+ *
+ */
 
 //#include <pcmcia/config.h>
 //#include <pcmcia/k_compat.h>
@@ -926,7 +901,7 @@ static int __init init_memory_mtd(void)
 	       "does not match!\n");
 	//return -1;
     }
-    printk("memory_mtd v0.03\n");
+    printk("pcmcia_mtd $Revision: 1.2 $\n");
     register_pccard_driver(&dev_info, &memory_attach, &memory_detach);
     return 0;
 }
