@@ -1,5 +1,5 @@
 /* 
- * $Id: pcmcia_mtd.c,v 1.15 2002-05-27 12:26:05 spse Exp $
+ * $Id: pcmcia_mtd.c,v 1.16 2002-05-27 12:56:22 spse Exp $
  *
  * pcmcia_mtd.c - MTD driver for PCMCIA flash memory cards
  *
@@ -32,7 +32,7 @@ static int pc_debug = 1;
 MODULE_PARM(pc_debug, "i");
 #undef DEBUG
 #define DEBUG(n, args...) if (pc_debug>=(n)) printk("pcmcia_mtd:" __FUNCTION__ "(): " args)
-static char *version ="pcmcia_mtd.c $Revision: 1.15 $";
+static char *version ="pcmcia_mtd.c $Revision: 1.16 $";
 #else
 #define DEBUG(n, args...)
 const int pc_debug = 0;
@@ -43,7 +43,7 @@ const int pc_debug = 0;
 /* Parameters that can be set with 'insmod' */
 
 /* 2 = do 16-bit transfers, 1 = do 8-bit transfers */
-static int buswidth = 0;
+static int buswidth = 2;
 
 /* Speed of memory accesses, in ns */
 static int mem_speed = 0;
@@ -57,21 +57,24 @@ static int vcc = 0;
 /* Force Vpp */
 static int vpp = 0;
 
-/* Force card to be treated as ROM */
-static int rom = 0;
+/* Force card to be treated as ROM or RAM */
+static int mem_type = 0;
 
-/* Force card to be treated as ROM */
-static int ram = 0;
-
-
-MODULE_PARM(buswidth, "i");
-MODULE_PARM(mem_speed, "i");
-MODULE_PARM(force_size, "i");
-MODULE_PARM(vcc, "i");
-MODULE_PARM(vpp, "i");
-MODULE_PARM(rom, "i");
-MODULE_PARM(ram, "i");
 MODULE_LICENSE("GPL");
+MODULE_AUTHOR("Simon Evans <spse@secret.org.uk>");
+MODULE_DESCRIPTION("PCMCIA Flash memory card driver");
+MODULE_PARM(buswidth, "i");
+MODULE_PARM_DESC(buswidth, "Set buswidth (1 = 8bit, 2 = 16 bit, default = 2)");
+MODULE_PARM(mem_speed, "i");
+MODULE_PARM_DESC(mem_speed, "Set memory access speed in ns");
+MODULE_PARM(force_size, "i");
+MODULE_PARM_DESC(force_size, "Force size of card in MB (1-64)");
+MODULE_PARM(vcc, "i");
+MODULE_PARM_DESC(vcc, "Set Vcc in 1/10ths eg 33 = 3.3V 120 = 12V (Dangerous)");
+MODULE_PARM(vpp, "i");
+MODULE_PARM_DESC(vpp, "Set Vpp in 1/10ths eg 33 = 3.3V 120 = 12V (Dangerous)");
+MODULE_PARM(mem_type, "i");
+MODULE_PARM_DESC(mem_type, "Set Memory type (0 = Flash, 1 = RAM, 2 = ROM, default = 0");
 
 /* Maximum number of separate memory devices we'll allow */
 #define MAX_DEV		4
@@ -82,7 +85,6 @@ MODULE_LICENSE("GPL");
 #define PCMCIA_BYTE_MASK(x)  (x-1)
 #define PCMCIA_WORD_MASK(x)  (x-2)
 
-static void memory_config(dev_link_t *link);
 static void memory_release(u_long arg);
 static int memory_event(event_t event, int priority,
 			event_callback_args_t *args);
@@ -100,14 +102,13 @@ typedef struct memory_dev_t {
 	struct map_info	pcmcia_map;	
 	struct mtd_info	*mtd_info;
 	char		mtd_name[sizeof(struct cistpl_vers_1_t)];
-
 } memory_dev_t;
 
 
 static dev_info_t dev_info = "memory_mtd";
 static dev_link_t *dev_table[MAX_DEV] = { NULL, /* ... */ };
 
-static void cs_error(client_handle_t handle, int func, int ret)
+static void inline cs_error(client_handle_t handle, int func, int ret)
 {
 	error_info_t err = { func, ret };
 	CardServices(ReportError, handle, &err);
@@ -563,16 +564,6 @@ static void memory_config(dev_link_t *link)
 	//static char *probes[] = { "jedec_probe", "cfi_probe", "sharp", "amd_flash", "jedec" };
 	static char *probes[] = { "sharp_probe", "jedec_probe" };
 
-
-	if(buswidth && buswidth != 1 && buswidth != 2) {
-		printk("bad buswidth (%d), using default\n", buswidth);
-		buswidth = 0;
-	}
-	if(force_size && force_size < 1 && force_size > 64) {
-		printk("bad force_size (%d), using default\n", force_size);
-		force_size = 0;
-	}
-
 	mtd  = dev->mtd_info;
 	DEBUG(0, "memory_config(0x%p)\n", link);
 
@@ -757,9 +748,9 @@ static void memory_config(dev_link_t *link)
 	DEBUG(2, "Vcc = %d Vpp1 = %d Vpp2 = %d\n", t.Vcc, t.Vpp1, t.Vpp2);
 	
 	r.Attributes = 0;
-	r.Vcc = (vcc) ? (vcc * 10) : t.Vcc;
-	r.Vpp1 = (vpp) ? (vpp * 10) : t.Vpp1;
-	r.Vpp2 = (vpp) ? (vpp * 10) : t.Vpp2;
+	r.Vcc = (vcc) ? vcc : t.Vcc;
+	r.Vpp1 = (vpp) ? vpp : t.Vpp1;
+	r.Vpp2 = (vpp) ? vpp : t.Vpp2;
 	
 	r.IntType = INT_MEMORY;
 	r.ConfigBase = t.ConfigBase;
@@ -794,10 +785,10 @@ static void memory_config(dev_link_t *link)
 	link->state &= ~DEV_CONFIG_PENDING;
     
 
-	if(rom) {
-		mtd = do_map_probe("map_rom", &dev->pcmcia_map);
-	} else if(ram) {
+	if(mem_type == 1) {
 		mtd = do_map_probe("map_ram", &dev->pcmcia_map);
+	} else if(mem_type == 2) {
+		mtd = do_map_probe("map_rom", &dev->pcmcia_map);
 	} else {
 		for(i = 0; i < sizeof(probes) / sizeof(char *); i++) {
 			DEBUG(1, "Trying %s\n", probes[i]);
@@ -940,6 +931,20 @@ static int __init init_memory_mtd(void)
 		//return -1;
 	}
 	register_pccard_driver(&dev_info, &memory_attach, &memory_detach);
+
+	if(buswidth && buswidth != 1 && buswidth != 2) {
+		printk("bad buswidth (%d), using default\n", buswidth);
+		buswidth = 2;
+	}
+	if(force_size && (force_size < 1 || force_size > 64)) {
+		printk("bad force_size (%d), using default\n", force_size);
+		force_size = 0;
+	}
+	if(mem_type && mem_type != 1 && mem_type != 2) {
+		printk("bad mem_type (%d), using default\n", mem_type);
+		mem_type = 0;
+	}
+
 	return 0;
 }
 
