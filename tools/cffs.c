@@ -11,7 +11,30 @@
 #include <netinet/in.h>
 #include <linux/mtd/mtd.h>
 
+#define _GNU_SOURCE
+#ifdef HAVE_GETOPT_LONG
+# include <getopt.h>
+#else
+# include "getopt.h"
+#endif
+
+
+
 #include "../fs/fileheader.h"
+
+
+#define VERSION "0.01"
+
+
+enum options {	none = 0, bad_options, dir, delete, erase, get, put, fsck, help, version };
+	
+
+
+// Used by getopt
+extern char *optarg;
+extern int optind, opterr, optopt;  
+
+
 
 /* 16bit check sum calculation */
 uint16_t calc_chk16(uint8_t *buf, int len)
@@ -78,20 +101,133 @@ void dump_header_ext(ciscoflash_filehdr_ext *h)
 }
 
 
+void usage()
+{
+	printf("cffs - cisco flash file system reader\n");
+	printf("Version " VERSION "\n");
+	printf("Usage: cffs <device> <option> [files...]\n");
+	printf("\t-l, --dir\t\tList files\n");
+	printf("\t-d, --delete\tDelete files\n");
+	printf("\t-e, --erase\tErase flash\n");
+	printf("\t-g, --get\tGet files from flash\n");
+	printf("\t-p, --put\tPut files onto flash\n");
+	printf("\t-f, --fsck\tCheck file system\n");
+	printf("\t-h, --help\tUsage information\n");
+	printf("\t-v, --version\tShow version\n");
+}
+
+
+enum options parse_opts(int argc, char **argv, char **device, int *filecnt, char ***files)
+{
+	static struct option long_options[] = {
+		{"dir",		no_argument, NULL, 'l'},
+		{"delete",	no_argument, NULL, 'd'},
+		{"erase",	no_argument, NULL, 'e'},
+		{"get",		no_argument, NULL, 'g'},
+		{"put",		no_argument, NULL, 'p'},
+		{"fsck",	no_argument, NULL, 'f'},
+		{"help",	no_argument, NULL, 'h'},
+		{0, 0, 0, 0}
+	};
+	static char *short_opts = "+ldegpf";
+	int a;
+	enum options option = none;
+
+	*files = NULL;
+	*filecnt = 0;
+	
+	if(argc > 1 && **(argv+1) != '-') {
+		*device = *(argv+1);
+		argc--;
+		argv++;
+	} else {
+		*device = NULL;
+		fprintf(stderr, "Error: no device specified\n");
+		return bad_options;
+	}
+
+	while(1) {
+		a = getopt_long(argc, argv, short_opts, long_options, NULL);
+		if(a == -1)
+			break;
+
+		if(option != none) {
+			fprintf(stderr, "Error: only one option can be specified\n");
+			return bad_options;
+		}
+		
+		switch(a) {
+		case 'l':
+			option = dir;
+			break;
+
+		case 'd':
+			option = delete;
+			break;
+			
+		case 'e':
+			option = erase;
+			break;
+
+		case 'g':
+			option = get;
+			break;
+			
+		case 'p':
+			option = put;
+			break;
+
+		case 'f':
+			option = fsck;
+			break;
+
+		default:
+			return bad_options;
+			break;
+		}
+	}
+
+	/* default option */
+
+	if(option == none)
+		option = dir;
+
+	/* check for any file names given */
+	if(optind < argc) {
+		*files = (argv+optind);
+		*filecnt = argc - optind;
+	}
+	return option;
+}		
+
+
 int main(int argc, char **argv)
 {
-	char *device = "/dev/mtd/0";
+	char *device;
 	int fd = -1;
 	struct stat sinfo;
 	uint32_t *magic;
 	char buf[sizeof(ciscoflash_filehdr_ext)];
 	char *p;
 	int eof = 0;
-	
-	if(argc > 2 && !strcmp(*(argv+1), "-d"))
-	   device = *(argv+2);
+	enum options options;
+	int filecnt;
+	char **files;
+			
+	options = parse_opts(argc, argv, &device, &filecnt, &files);
 
-	printf("Using device %s\n", device);
+	if(options == bad_options)
+		exit(1);
+
+	if(device)
+		printf("device = %s\n", device);
+
+	if(filecnt) {
+		printf("File args: ");
+		while(filecnt--)
+			printf("%s ", *(files++));
+		printf("\n");
+	}
 	
 	fd = open(device, O_RDONLY);
 	if(fd == -1) {
@@ -146,9 +282,11 @@ int main(int argc, char **argv)
 		}
 	}
 	
+	close(fd);
+	exit(0);
 
  error:
 	if(fd != -1)
 		close(fd);
-	return 0;
+	exit(1);
 }
