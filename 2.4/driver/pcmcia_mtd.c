@@ -1,12 +1,12 @@
-/* 
- * $Id: pcmcia_mtd.c,v 1.16 2002-05-27 12:56:22 spse Exp $
+/*
+ * $Id: pcmcia_mtd.c,v 1.17 2002-05-27 16:05:07 spse Exp $
  *
  * pcmcia_mtd.c - MTD driver for PCMCIA flash memory cards
  *
  * Author: Simon Evans <spse@secret.org.uk>
  *
  * Copyright (C) 2002 Simon Evans
- * 
+ *
  * Licence: GPL
  *
  */
@@ -24,58 +24,32 @@
 
 #include <linux/mtd/map.h>
 
-#define PCMCIA_DEBUG
+#define CONFIG_MTD_DEBUG
+#define CONFIG_MTD_DEBUG_VERBOSE 3
 
 
-#ifdef PCMCIA_DEBUG
-static int pc_debug = 1;
-MODULE_PARM(pc_debug, "i");
+#ifdef CONFIG_MTD_DEBUG
+static int debug = CONFIG_MTD_DEBUG_VERBOSE;
+MODULE_PARM(debug, "i");
+MODULE_PARM_DESC(debug, "Set Debug Level 0 = quiet, 5 = noisy");
 #undef DEBUG
-#define DEBUG(n, args...) if (pc_debug>=(n)) printk("pcmcia_mtd:" __FUNCTION__ "(): " args)
-static char *version ="pcmcia_mtd.c $Revision: 1.16 $";
+#define DEBUG(n, format, arg...) \
+	if (n <= debug) {	 \
+		printk(KERN_DEBUG __FILE__ ":" __FUNCTION__ "(): " format "\n", ## arg); \
+	}
+
 #else
-#define DEBUG(n, args...)
-const int pc_debug = 0;
+#define DEBUG(n, arg...)
+static const int debug = 0;
 #endif
 
-/*====================================================================*/
+#define err(format, arg...) printk(KERN_ERR __FILE__ ": " format "\n" , ## arg)
+#define info(format, arg...) printk(KERN_INFO __FILE__ ": " format "\n" , ## arg)
+#define warn(format, arg...) printk(KERN_WARNING __FILE__ ": " format "\n" , ## arg)
 
-/* Parameters that can be set with 'insmod' */
 
-/* 2 = do 16-bit transfers, 1 = do 8-bit transfers */
-static int buswidth = 2;
-
-/* Speed of memory accesses, in ns */
-static int mem_speed = 0;
-
-/* Force the size of an SRAM card */
-static int force_size = 0;
-
-/* Force Vcc */
-static int vcc = 0;
-
-/* Force Vpp */
-static int vpp = 0;
-
-/* Force card to be treated as ROM or RAM */
-static int mem_type = 0;
-
-MODULE_LICENSE("GPL");
-MODULE_AUTHOR("Simon Evans <spse@secret.org.uk>");
-MODULE_DESCRIPTION("PCMCIA Flash memory card driver");
-MODULE_PARM(buswidth, "i");
-MODULE_PARM_DESC(buswidth, "Set buswidth (1 = 8bit, 2 = 16 bit, default = 2)");
-MODULE_PARM(mem_speed, "i");
-MODULE_PARM_DESC(mem_speed, "Set memory access speed in ns");
-MODULE_PARM(force_size, "i");
-MODULE_PARM_DESC(force_size, "Force size of card in MB (1-64)");
-MODULE_PARM(vcc, "i");
-MODULE_PARM_DESC(vcc, "Set Vcc in 1/10ths eg 33 = 3.3V 120 = 12V (Dangerous)");
-MODULE_PARM(vpp, "i");
-MODULE_PARM_DESC(vpp, "Set Vpp in 1/10ths eg 33 = 3.3V 120 = 12V (Dangerous)");
-MODULE_PARM(mem_type, "i");
-MODULE_PARM_DESC(mem_type, "Set Memory type (0 = Flash, 1 = RAM, 2 = ROM, default = 0");
-
+#define DRIVER_DESC	"PCMCIA Flash memory card driver"
+#define DRIVER_VERSION	"$Revision: 1.17 $"
 /* Maximum number of separate memory devices we'll allow */
 #define MAX_DEV		4
 
@@ -85,28 +59,66 @@ MODULE_PARM_DESC(mem_type, "Set Memory type (0 = Flash, 1 = RAM, 2 = ROM, defaul
 #define PCMCIA_BYTE_MASK(x)  (x-1)
 #define PCMCIA_WORD_MASK(x)  (x-2)
 
-static void memory_release(u_long arg);
-static int memory_event(event_t event, int priority,
-			event_callback_args_t *args);
-
-static dev_link_t *memory_attach(void);
-static void memory_detach(dev_link_t *);
 
 typedef struct memory_dev_t {
 	dev_link_t	link;		/* PCMCIA link */
-	caddr_t		win_base;	/* ioremapped address of PCMCIA window */	
+	caddr_t		win_base;	/* ioremapped address of PCMCIA window */
 	unsigned int	win_size;	/* size of window (usually 64K) */
 	unsigned int	cardsize;	/* size of whole card */
 	unsigned int	offset;		/* offset into card the window currently points at */
 	unsigned int	memspeed;	/* memory access speed in ns */
-	struct map_info	pcmcia_map;	
+	struct map_info	pcmcia_map;
 	struct mtd_info	*mtd_info;
 	char		mtd_name[sizeof(struct cistpl_vers_1_t)];
 } memory_dev_t;
 
+static void memory_release(u_long arg);
+static int memory_event(event_t event, int priority, event_callback_args_t *args);
+static dev_link_t *memory_attach(void);
+static void memory_detach(dev_link_t *);
 
-static dev_info_t dev_info = "memory_mtd";
+
+static dev_info_t dev_info = "pcmcia_mtd";
 static dev_link_t *dev_table[MAX_DEV] = { NULL, /* ... */ };
+
+
+/* Module parameters */
+
+/* 2 = do 16-bit transfers, 1 = do 8-bit transfers */
+static int buswidth = 2;
+
+/* Speed of memory accesses, in ns */
+static int mem_speed;
+
+/* Force the size of an SRAM card */
+static int force_size;
+
+/* Force Vcc */
+static int vcc;
+
+/* Force Vpp */
+static int vpp;
+
+/* Force card to be treated as FLASH, ROM or RAM */
+static int mem_type;
+
+MODULE_LICENSE("GPL");
+MODULE_AUTHOR("Simon Evans <spse@secret.org.uk>");
+MODULE_DESCRIPTION(DRIVER_DESC);
+MODULE_PARM(buswidth, "i");
+MODULE_PARM_DESC(buswidth, "Set buswidth (1 = 8 bit, 2 = 16 bit, default = 2)");
+MODULE_PARM(mem_speed, "i");
+MODULE_PARM_DESC(mem_speed, "Set memory access speed in ns");
+MODULE_PARM(force_size, "i");
+MODULE_PARM_DESC(force_size, "Force size of card in MB (1-64)");
+MODULE_PARM(vcc, "i");
+MODULE_PARM_DESC(vcc, "Set Vcc in 1/10ths eg 33 = 3.3V 120 = 12V (Dangerous)");
+MODULE_PARM(vpp, "i");
+MODULE_PARM_DESC(vpp, "Set Vpp in 1/10ths eg 33 = 3.3V 120 = 12V (Dangerous)");
+MODULE_PARM(mem_type, "i");
+MODULE_PARM_DESC(mem_type, "Set Memory type (0 = Flash, 1 = RAM, 2 = ROM, default = 0)");
+
+
 
 static void inline cs_error(client_handle_t handle, int func, int ret)
 {
@@ -125,7 +137,7 @@ static inline int remap_window(memory_dev_t *dev, window_handle_t win, unsigned 
 
 	mrq.CardOffset = to & ~PCMCIA_BYTE_MASK(dev->win_size);
 	if(mrq.CardOffset != dev->offset) {
-		DEBUG(2, "Remapping window from 0x%8.8x to 0x%8.8x\n", 
+		DEBUG(2, "Remapping window from 0x%8.8x to 0x%8.8x",
 		      dev->offset, mrq.CardOffset);
 		mrq.Page = 0;
 		if( (ret = CardServices(MapMemPage, win, &mrq)) != CS_SUCCESS) {
@@ -135,7 +147,7 @@ static inline int remap_window(memory_dev_t *dev, window_handle_t win, unsigned 
 		dev->offset = mrq.CardOffset;
 	}
 	return 0;
-}		
+}
 
 
 static __u8 pcmcia_read8_remap(struct map_info *map, unsigned long ofs)
@@ -148,9 +160,9 @@ static __u8 pcmcia_read8_remap(struct map_info *map, unsigned long ofs)
 		return 0;
 
 	d = readb((dev->win_base) + (ofs & PCMCIA_BYTE_MASK(dev->win_size)));
-	DEBUG(3, "ofs = 0x%08lx (%p) data = 0x%02x\n", ofs,
+	DEBUG(3, "ofs = 0x%08lx (%p) data = 0x%02x", ofs,
 	      (dev->win_base)+(ofs & PCMCIA_BYTE_MASK(dev->win_size)), d);
-  
+
 	return d;
 }
 
@@ -165,9 +177,9 @@ static __u16 pcmcia_read16_remap(struct map_info *map, unsigned long ofs)
 		return 0;
 
 	d = readw((dev->win_base)+(ofs & PCMCIA_BYTE_MASK(dev->win_size)));
-	DEBUG(3, "ofs = 0x%08lx (%p) data = 0x%04x\n", ofs,
+	DEBUG(3, "ofs = 0x%08lx (%p) data = 0x%04x", ofs,
 	      (dev->win_base)+(ofs & PCMCIA_BYTE_MASK(dev->win_size)), d);
-  
+
 	return d;
 }
 
@@ -177,14 +189,14 @@ static void pcmcia_copy_from_remap(struct map_info *map, void *to, unsigned long
 	memory_dev_t *dev = (memory_dev_t *)map->map_priv_1;
 	window_handle_t win = (window_handle_t)map->map_priv_2;
 
-	DEBUG(3, "to = %p from = %lu len = %u\n", to, from, len);
+	DEBUG(3, "to = %p from = %lu len = %u", to, from, len);
 	while(len) {
 		int toread = dev->win_size - (from & PCMCIA_BYTE_MASK(dev->win_size));
 		int tocpy;
-		if(toread > len) 
+		if(toread > len)
 			toread = len;
 
-		DEBUG(4, "from = 0x%8.8lx len = %u toread = %ld offset = 0x%8.8lx\n",
+		DEBUG(4, "from = 0x%8.8lx len = %u toread = %ld offset = 0x%8.8lx",
 		      (long)from, (unsigned int)len, (long)toread, from & ~PCMCIA_BYTE_MASK(dev->win_size));
 
 		if(remap_window(dev, win, from) == -1)
@@ -194,7 +206,7 @@ static void pcmcia_copy_from_remap(struct map_info *map, void *to, unsigned long
 		if((from & 1) && (map->buswidth == 2)) {
 			__u16 data;
 
-			DEBUG(4, "reading word from %p\n", dev->win_base + (from & PCMCIA_WORD_MASK(dev->win_size)));
+			DEBUG(4, "reading word from %p", dev->win_base + (from & PCMCIA_WORD_MASK(dev->win_size)));
 			data = readw(dev->win_base + (from & PCMCIA_WORD_MASK(dev->win_size)));
 			*(__u8 *)to = (__u8)(data >> 8);
 			to++;
@@ -206,7 +218,7 @@ static void pcmcia_copy_from_remap(struct map_info *map, void *to, unsigned long
 		if(map->buswidth == 2)
 			tocpy &= PCMCIA_WORD_MASK(dev->win_size);
 
-		DEBUG(4, "memcpy from %p to %p len = %d\n", 
+		DEBUG(4, "memcpy from %p to %p len = %d",
 		      dev->win_base + (from & PCMCIA_WORD_MASK(dev->win_size)), to, tocpy);
 		memcpy_fromio(to, (dev->win_base) + (from & PCMCIA_BYTE_MASK(dev->win_size)), tocpy);
 		len -= tocpy;
@@ -217,7 +229,7 @@ static void pcmcia_copy_from_remap(struct map_info *map, void *to, unsigned long
 		if((toread & 1) && (map->buswidth == 2)) {
 			__u16 data;
 
-			DEBUG(4, "reading word from %p\n", dev->win_base + (from & PCMCIA_WORD_MASK(dev->win_size)));
+			DEBUG(4, "reading word from %p", dev->win_base + (from & PCMCIA_WORD_MASK(dev->win_size)));
 			data = readw((dev->win_base) + (from & PCMCIA_WORD_MASK(dev->win_size)));
 			*(__u8 *)to = (__u8)(data & 0xff);
 			to++;
@@ -238,7 +250,7 @@ static void pcmcia_write8_remap(struct map_info *map, __u8 d, unsigned long adr)
 	if(remap_window(dev, win, adr) == -1)
 		return;
 
-	DEBUG(3, "adr = 0x%08lx (%p)  data = 0x%02x\n", adr, 
+	DEBUG(3, "adr = 0x%08lx (%p)  data = 0x%02x", adr,
 	      (dev->win_base)+(adr & PCMCIA_BYTE_MASK(dev->win_size)), d);
 	writeb(d, (dev->win_base)+(adr & PCMCIA_BYTE_MASK(dev->win_size)));
 }
@@ -252,7 +264,7 @@ static void pcmcia_write16_remap(struct map_info *map, __u16 d, unsigned long ad
 	if(remap_window(dev, win, adr) == -1)
 		return;
 
-	DEBUG(3, "adr = 0x%08lx (%p)  data = 0x%04x\n", adr, 
+	DEBUG(3, "adr = 0x%08lx (%p)  data = 0x%04x", adr,
 	      (dev->win_base)+(adr & PCMCIA_BYTE_MASK(dev->win_size)), d);
 	writew(d, (dev->win_base)+(adr & PCMCIA_BYTE_MASK(dev->win_size)));
 }
@@ -263,14 +275,14 @@ static void pcmcia_copy_to_remap(struct map_info *map, unsigned long to, const v
 	memory_dev_t *dev = (memory_dev_t *)map->map_priv_1;
 	window_handle_t win = (window_handle_t)map->map_priv_2;
 
-	DEBUG(3, "to = %lu from = %p len = %u\n", to, from, len);
+	DEBUG(3, "to = %lu from = %p len = %u", to, from, len);
 	while(len) {
 		int towrite = dev->win_size - (to & PCMCIA_BYTE_MASK(dev->win_size));
 		int tocpy;
-		if(towrite > len) 
+		if(towrite > len)
 			towrite = len;
 
-		DEBUG(4, "to = 0x%8.8lx len = %u towrite = %d offset = 0x%8.8lx\n",
+		DEBUG(4, "to = 0x%8.8lx len = %u towrite = %d offset = 0x%8.8lx",
 		      to, len, towrite, to & ~PCMCIA_BYTE_MASK(dev->win_size));
 
 		if(remap_window(dev, win, to) == -1)
@@ -280,7 +292,7 @@ static void pcmcia_copy_to_remap(struct map_info *map, unsigned long to, const v
 		if((to & 1) && (map->buswidth == 2)) {
 			__u16 data;
 
-			DEBUG(4, "writing word to %p\n", dev->win_base + (to & PCMCIA_WORD_MASK(dev->win_size)));
+			DEBUG(4, "writing word to %p", dev->win_base + (to & PCMCIA_WORD_MASK(dev->win_size)));
 			data = readw(dev->win_base + (to & PCMCIA_WORD_MASK(dev->win_size)));
 			data &= 0x00ff;
 			data |= *(__u8 *)from << 8;
@@ -296,7 +308,7 @@ static void pcmcia_copy_to_remap(struct map_info *map, unsigned long to, const v
 			tocpy &= PCMCIA_WORD_MASK(dev->win_size);
 
 
-		DEBUG(4, "memcpy from %p to %p len = %d\n", 
+		DEBUG(4, "memcpy from %p to %p len = %d",
 		      from, dev->win_base + (to & PCMCIA_WORD_MASK(dev->win_size)), tocpy);
 		memcpy_toio((dev->win_base) + (to & PCMCIA_BYTE_MASK(dev->win_size)), from, tocpy);
 		len -= tocpy;
@@ -307,7 +319,7 @@ static void pcmcia_copy_to_remap(struct map_info *map, unsigned long to, const v
 		if((towrite & 1) && (map->buswidth ==2)) {
 			__u16 data;
 
-			DEBUG(4, "writing word to %p\n", dev->win_base + (to & PCMCIA_WORD_MASK(dev->win_size)));
+			DEBUG(4, "writing word to %p", dev->win_base + (to & PCMCIA_WORD_MASK(dev->win_size)));
 			data = readw((dev->win_base) + (to & PCMCIA_WORD_MASK(dev->win_size)));
 			data &= 0xff00;
 			data |= *(__u8 *)from;
@@ -329,7 +341,7 @@ static __u8 pcmcia_read8(struct map_info *map, unsigned long ofs)
 	__u8 d;
 
 	d = readb(win_base + ofs);
-	DEBUG(3, "ofs = 0x%08lx (%p) data = 0x%02x\n", ofs, win_base + ofs, d);
+	DEBUG(3, "ofs = 0x%08lx (%p) data = 0x%02x", ofs, win_base + ofs, d);
 	return d;
 }
 
@@ -340,7 +352,7 @@ static __u16 pcmcia_read16(struct map_info *map, unsigned long ofs)
 	__u16 d;
 
 	d = readw(win_base +ofs);
-	DEBUG(3, "ofs = 0x%08lx (%p) data = 0x%04x\n", ofs, win_base + ofs, d);  
+	DEBUG(3, "ofs = 0x%08lx (%p) data = 0x%04x", ofs, win_base + ofs, d);
 	return d;
 }
 
@@ -352,10 +364,10 @@ static void pcmcia_copy_from(struct map_info *map, void *to, unsigned long from,
 	__u16 data;
 	ssize_t tocpy;
 
-	DEBUG(3, "to = %p from = %lu len = %u\n", to, from, len);
+	DEBUG(3, "to = %p from = %lu len = %u", to, from, len);
 	// Handle odd byte on 16bit bus
 	if((from & 1) && (map->buswidth == 2)) {
-		DEBUG(4, "reading word from %p\n", win_base + from);
+		DEBUG(4, "reading word from %p", win_base + from);
 		data = readw(win_base + from);
 		*(__u8 *)to = (__u8)(data >> 8);
 		to++;
@@ -366,7 +378,7 @@ static void pcmcia_copy_from(struct map_info *map, void *to, unsigned long from,
 	if(map->buswidth == 2)
 		tocpy &= PCMCIA_WORD_MASK(win_size);
 
-	DEBUG(4, "memcpy from %p to %p len = %d\n", win_base + (from & PCMCIA_WORD_MASK(win_size)), to, tocpy);
+	DEBUG(4, "memcpy from %p to %p len = %d", win_base + (from & PCMCIA_WORD_MASK(win_size)), to, tocpy);
 	memcpy_fromio(to, win_base + (from & PCMCIA_BYTE_MASK(win_size)), tocpy);
 	len -= tocpy;
 	to += tocpy;
@@ -374,7 +386,7 @@ static void pcmcia_copy_from(struct map_info *map, void *to, unsigned long from,
 
 	// Handle even byte on 16bit bus
 	if((len & 1) && (map->buswidth == 2)) {
-		DEBUG(4, "reading word from %p\n", win_base + (from & PCMCIA_WORD_MASK(win_size)));
+		DEBUG(4, "reading word from %p", win_base + (from & PCMCIA_WORD_MASK(win_size)));
 		data = readw(win_base + (from & PCMCIA_WORD_MASK(win_size)));
 		*(__u8 *)to = (__u8)(data & 0xff);
 	}			
@@ -385,7 +397,7 @@ static void pcmcia_write8(struct map_info *map, __u8 d, unsigned long adr)
 {
 	caddr_t win_base = (caddr_t)map->map_priv_1;
 
-	DEBUG(3, "adr = 0x%08lx (%p)  data = 0x%02x\n", adr, win_base + adr, d);
+	DEBUG(3, "adr = 0x%08lx (%p)  data = 0x%02x", adr, win_base + adr, d);
 	writeb(d, win_base + adr);
 }
 
@@ -394,7 +406,7 @@ static void pcmcia_write16(struct map_info *map, __u16 d, unsigned long adr)
 {
 	caddr_t win_base = (caddr_t)map->map_priv_1;
 
-	DEBUG(3, "adr = 0x%08lx (%p)  data = 0x%04x\n", adr, win_base + adr, d);
+	DEBUG(3, "adr = 0x%08lx (%p)  data = 0x%04x", adr, win_base + adr, d);
 	writew(d, win_base + adr);
 }
 
@@ -406,10 +418,10 @@ static void pcmcia_copy_to(struct map_info *map, unsigned long to, const void *f
 	__u16 data;
 	ssize_t tocpy;
 
-	DEBUG(3, "to = %lu from = %p len = %u\n", to, from, len);
+	DEBUG(3, "to = %lu from = %p len = %u", to, from, len);
 	// Handle odd byte on 16bit bus
 	if((to & 1) && (map->buswidth == 2)) {
-		DEBUG(4, "writing word to %p\n", win_base + to);
+		DEBUG(4, "writing word to %p", win_base + to);
 		data = readw(win_base + to);
 		data &= 0x00ff;
 		data |= *(__u8 *)from << 8;
@@ -423,7 +435,7 @@ static void pcmcia_copy_to(struct map_info *map, unsigned long to, const void *f
 	if(map->buswidth == 2)
 		tocpy &= PCMCIA_WORD_MASK(win_size);
 	
-	DEBUG(4, "memcpy from %p to %p len = %d\n", from, win_base + (to & PCMCIA_WORD_MASK(win_size)), tocpy);
+	DEBUG(4, "memcpy from %p to %p len = %d", from, win_base + (to & PCMCIA_WORD_MASK(win_size)), tocpy);
 	memcpy_toio(win_base + (to & PCMCIA_BYTE_MASK(win_size)), from, tocpy);
 	len -= tocpy;
 	to += tocpy;
@@ -431,7 +443,7 @@ static void pcmcia_copy_to(struct map_info *map, unsigned long to, const void *f
 
 	// Handle even byte on 16bit bus
 	if((len & 1) && (map->buswidth ==2)) {
-		DEBUG(4, "writing word to %p\n", win_base + (to & PCMCIA_WORD_MASK(win_size)));
+		DEBUG(4, "writing word to %p", win_base + (to & PCMCIA_WORD_MASK(win_size)));
 		data = readw(win_base + (to & PCMCIA_WORD_MASK(win_size)));
 		data &= 0xff00;
 		data |= *(__u8 *)from;
@@ -439,7 +451,6 @@ static void pcmcia_copy_to(struct map_info *map, unsigned long to, const void *f
 	}
 }
 
-  
 
 
 /*======================================================================
@@ -456,20 +467,19 @@ static dev_link_t *memory_attach(void)
 	dev_link_t *link;
 	client_reg_t client_reg;
 	int i, ret;
-    
-	DEBUG(0, "memory_attach()\n");
-	printk("memory_attach()\n");
+
+	DEBUG(2, "memory_attach()");
 	for (i = 0; i < MAX_DEV; i++)
 		if (dev_table[i] == NULL) break;
 	if (i == MAX_DEV) {
-		printk(KERN_NOTICE "memory_mtd: no devices available\n");
+		err("no devices available");
 		return NULL;
 	}
-    
+
 	/* Create new memory card device */
 	dev = kmalloc(sizeof(*dev), GFP_KERNEL);
 	if (!dev) return NULL;
-	DEBUG(1, "memory_attach: dev = %p\n", dev);
+	DEBUG(1, "memory_attach: dev = %p", dev);
 
 	memset(dev, 0, sizeof(*dev));
 	link = &dev->link; link->priv = dev;
@@ -489,16 +499,16 @@ static dev_link_t *memory_attach(void)
 	client_reg.event_handler = &memory_event;
 	client_reg.Version = 0x0210;
 	client_reg.event_callback_args.client_data = link;
-	printk("Calling RegisterClient\n");
+	DEBUG(2, "Calling RegisterClient");
 	ret = CardServices(RegisterClient, &link->handle, &client_reg);
 	if (ret != 0) {
 		cs_error(link->handle, RegisterClient, ret);
 		memory_detach(link);
 		return NULL;
 	}
-    
+
 	return link;
-} /* memory_attach */
+}
 
 /*======================================================================
 
@@ -513,10 +523,8 @@ static void memory_detach(dev_link_t *link)
 {
 	memory_dev_t *dev = link->priv;
 
-	DEBUG(0, "memory_detach(0x%p)\n", link);
-    
+	DEBUG(3, "memory_detach(0x%p)", link);
 #if 0
-	del_timer(&link->release);
 	if (link->state & DEV_CONFIG) {
 		memory_release((u_long)link);
 		if (link->state & DEV_STALE_CONFIG) {
@@ -530,12 +538,7 @@ static void memory_detach(dev_link_t *link)
 	return;
 	/* Unlink device structure, free bits */
 	kfree(dev);
-    
-} /* memory_detach */
-
-
-#define WIN_TYPE(a)  ((a) ? WIN_MEMORY_TYPE_AM : WIN_MEMORY_TYPE_CM)
-#define WIN_WIDTH(w) ((w) ? WIN_DATA_WIDTH_16 : WIN_DATA_WIDTH_8)
+}
 
 
 /*======================================================================
@@ -543,7 +546,7 @@ static void memory_detach(dev_link_t *link)
 memory_config() is scheduled to run after a CARD_INSERTION event
 is received, to configure the PCMCIA socket, and to make the
 MTD device available to the system.
-    
+
 ======================================================================*/
 
 #define CS_CHECK(fn, args...) \
@@ -552,20 +555,16 @@ while ((last_ret=CardServices(last_fn=(fn), args))!=0) goto cs_failed
 static void memory_config(dev_link_t *link)
 {
 	memory_dev_t *dev = link->priv;
-	struct mtd_info *mtd;
+	struct mtd_info *mtd = NULL;
 	cs_status_t status;
 	win_req_t req;
 	int last_ret = 0, last_fn = 0;
 	int i,j;
 	config_info_t t;
 	config_req_t r;
+	static const char *probes[] = { "sharp_probe", "jedec_probe", "cfi_probe" };
 
-
-	//static char *probes[] = { "jedec_probe", "cfi_probe", "sharp", "amd_flash", "jedec" };
-	static char *probes[] = { "sharp_probe", "jedec_probe" };
-
-	mtd  = dev->mtd_info;
-	DEBUG(0, "memory_config(0x%p)\n", link);
+	DEBUG(3, "memory_config(0x%p)", link);
 
 	/* Configure card */
 	link->state |= DEV_CONFIG;
@@ -591,7 +590,7 @@ static void memory_config(dev_link_t *link)
 			switch(tuple.TupleCode) {
 			case  CISTPL_FORMAT: {
 				cistpl_format_t *t = &parse.format;
-				DEBUG(2, "memory_mtd: Format type: %u, Error Detection: %u, offset = %u, length =%u\n",
+				DEBUG(2, "Format type: %u, Error Detection: %u, offset = %u, length =%u",
 				      t->type, t->edc, t->offset, t->length);
 				break;
 
@@ -600,13 +599,13 @@ static void memory_config(dev_link_t *link)
 			case CISTPL_DEVICE: {
 				cistpl_device_t *t = &parse.device;
 				int i;
-				DEBUG(1, "Common memory:\n");
-				dev->pcmcia_map.size = t->dev[0].size;
+				DEBUG(1, "Common memory:");
+ 				dev->pcmcia_map.size = t->dev[0].size;
 				for(i = 0; i < t->ndev; i++) {
-					DEBUG(2, "Region %d, type = %u\n", i, t->dev[i].type);
-					DEBUG(2, "Region %d, wp = %u\n", i, t->dev[i].wp);
-					DEBUG(2, "Region %d, speed = %u ns\n", i, t->dev[i].speed);
-					DEBUG(2, "Region %d, size = %u bytes\n", i, t->dev[i].size);
+					DEBUG(2, "Region %d, type = %u", i, t->dev[i].type);
+					DEBUG(2, "Region %d, wp = %u", i, t->dev[i].wp);
+					DEBUG(2, "Region %d, speed = %u ns", i, t->dev[i].speed);
+					DEBUG(2, "Region %d, size = %u bytes", i, t->dev[i].size);
 				}
 				break;
 			}
@@ -622,7 +621,7 @@ static void memory_config(dev_link_t *link)
 						strcat(dev->mtd_name, t->str+t->ofs[i]);
 					}
 				}
-				DEBUG(2, "Found name: %s\n", dev->mtd_name);
+				DEBUG(2, "Found name: %s", dev->mtd_name);
 				break;
 			}
 
@@ -630,7 +629,7 @@ static void memory_config(dev_link_t *link)
 				cistpl_jedec_t *t = &parse.jedec;
 				int i;
 				for(i = 0; i < t->nid; i++) {
-					DEBUG(2, "JEDEC: 0x%02x 0x%02x\n", t->id[i].mfr, t->id[i].info);
+					DEBUG(2, "JEDEC: 0x%02x 0x%02x", t->id[i].mfr, t->id[i].info);
 				}
 				break;
 			}
@@ -640,18 +639,18 @@ static void memory_config(dev_link_t *link)
 				int i;
 				dev->pcmcia_map.buswidth = t->geo[0].buswidth;
 				for(i = 0; i < t->ngeo; i++) {
-					DEBUG(2, "region: %d buswidth = %u\n", i, t->geo[i].buswidth);
-					DEBUG(2, "region: %d erase_block = %u\n", i, t->geo[i].erase_block);
-					DEBUG(2, "region: %d read_block = %u\n", i, t->geo[i].read_block);
-					DEBUG(2, "region: %d write_block = %u\n", i, t->geo[i].write_block);
-					DEBUG(2, "region: %d partition = %u\n", i, t->geo[i].partition);
-					DEBUG(2, "region: %d interleave = %u\n", i, t->geo[i].interleave);
+					DEBUG(2, "region: %d buswidth = %u", i, t->geo[i].buswidth);
+					DEBUG(2, "region: %d erase_block = %u", i, t->geo[i].erase_block);
+					DEBUG(2, "region: %d read_block = %u", i, t->geo[i].read_block);
+					DEBUG(2, "region: %d write_block = %u", i, t->geo[i].write_block);
+					DEBUG(2, "region: %d partition = %u", i, t->geo[i].partition);
+					DEBUG(2, "region: %d interleave = %u", i, t->geo[i].interleave);
 				}
 				break;
 			}
 			
 			default:
-				DEBUG(1, "Unknown tuple code %d\n", tuple.TupleCode);
+				DEBUG(1, "Unknown tuple code %d", tuple.TupleCode);
 			}
 				
 			rc = CardServices(GetNextTuple, link->handle, &tuple, &parse);
@@ -674,13 +673,13 @@ static void memory_config(dev_link_t *link)
 
 	if(force_size) {
 		dev->pcmcia_map.size = force_size << 20;
-		DEBUG(2, "size fored to %dM\n", force_size);
+		DEBUG(2, "size fored to %dM", force_size);
 
 	}
 
 	if(buswidth) {
 		dev->pcmcia_map.buswidth = buswidth;
-		DEBUG(2, "buswidth forced to %d\n", buswidth);
+		DEBUG(2, "buswidth forced to %d", buswidth);
 	}		
 
 
@@ -689,9 +688,9 @@ static void memory_config(dev_link_t *link)
 		strcpy(dev->mtd_name, "PCMCIA Memory card");
 
 
-	DEBUG(1, "Device: Size: %lu Width:%d Name: %s\n",
+	DEBUG(1, "Device: Size: %lu Width:%d Name: %s",
 	      dev->pcmcia_map.size, dev->pcmcia_map.buswidth << 3, dev->mtd_name);
-    
+
 	/* Allocate a small memory window for direct access */
 	req.Attributes =  WIN_MEMORY_TYPE_CM | WIN_ENABLE;
 	req.Attributes |= (dev->pcmcia_map.buswidth == 1) ? WIN_DATA_WIDTH_8 : WIN_DATA_WIDTH_16;
@@ -711,30 +710,30 @@ static void memory_config(dev_link_t *link)
 	dev->win_size = 0;
 	do {
 		int ret;
-		DEBUG(2, "requesting window with size = %dKB memspeed = %d\n",
+		DEBUG(2, "requesting window with size = %dKB memspeed = %d",
 		      req.Size >> 10, req.AccessSpeed);
 		link->win = (window_handle_t)link->handle;
 		ret = CardServices(RequestWindow, &link->win, &req);
-		DEBUG(2, "ret = %d dev->win_size = %d\n", ret, dev->win_size);
+		DEBUG(2, "ret = %d dev->win_size = %d", ret, dev->win_size);
 		if(ret) {
 			cs_error(link->handle, RequestWindow, ret);
 			req.Size >>= 1;
 		} else {
-			DEBUG(2, "Got window of size %dKB\n", req.Size >> 10);
+			DEBUG(2, "Got window of size %dKB", req.Size >> 10);
 			dev->win_size = req.Size;
 			break;
 		}
 	} while(req.Size >= 0x10000);
-	DEBUG(2, "dev->win_size = %d\n", dev->win_size);
+	DEBUG(2, "dev->win_size = %d", dev->win_size);
 	if(!dev->win_size)
 		goto cs_failed;
 
 	/* Get write protect status */
 	CS_CHECK(GetStatus, link->handle, &status);
-	DEBUG(1, "status value: 0x%x\n", status.CardState);
-	DEBUG(2, "Window handle = 0x%8.8lx\n", (unsigned long)link->win);
+	DEBUG(1, "status value: 0x%x", status.CardState);
+	DEBUG(2, "Window handle = 0x%8.8lx", (unsigned long)link->win);
 	dev->win_base = ioremap(req.Base, req.Size);
-	DEBUG(1, "mapped window dev = %p req.base = 0x%lx base = %p size = 0x%x\n",
+	DEBUG(1, "mapped window dev = %p req.base = 0x%lx base = %p size = 0x%x",
 	      dev, req.Base, dev->win_base, req.Size);
 	dev->win_size = req.Size;
 	dev->cardsize = 0;
@@ -743,9 +742,9 @@ static void memory_config(dev_link_t *link)
 	dev->pcmcia_map.map_priv_1 = (unsigned long)dev;
 	dev->pcmcia_map.map_priv_2 = (unsigned long)link->win;
 
-	DEBUG(2, "Getting configuration\n");
+	DEBUG(2, "Getting configuration");
 	CS_CHECK(GetConfigurationInfo, link->handle, &t);
-	DEBUG(2, "Vcc = %d Vpp1 = %d Vpp2 = %d\n", t.Vcc, t.Vpp1, t.Vpp2);
+	DEBUG(2, "Vcc = %d Vpp1 = %d Vpp2 = %d", t.Vcc, t.Vpp1, t.Vpp2);
 	
 	r.Attributes = 0;
 	r.Vcc = (vcc) ? vcc : t.Vcc;
@@ -760,30 +759,28 @@ static void memory_config(dev_link_t *link)
 	r.ExtStatus = t.ExtStatus;
 	r.ConfigIndex = 0;
 	r.Present = t.Present;
-	DEBUG(2, "Setting Configuration\n");
+	DEBUG(2, "Setting Configuration");
 	CS_CHECK(RequestConfiguration, link->handle ,&r);
 	
-	DEBUG(2, "Getting configuration\n");
+	DEBUG(2, "Getting configuration");
 	CS_CHECK(GetConfigurationInfo, link->handle, &t);
-	DEBUG(2, "Vcc = %d Vpp1 = %d Vpp2 = %d\n", t.Vcc, t.Vpp1, t.Vpp2);
+	DEBUG(2, "Vcc = %d Vpp1 = %d Vpp2 = %d", t.Vcc, t.Vpp1, t.Vpp2);
 
 	/* Dump 256 bytes from card */
-	if(pc_debug > 4) {
+	if(debug > 4) {
 		char *p = dev->win_base;
 		for(i = 0; i < 16; i++) {
-			printk("memory_mtd: 0x%4.4x: ", i << 4);
+			printk(KERN_DEBUG "pcmcia_mtd: 0x%4.4x: ", i << 4);
 			for(j = 0; j < 8; j++) {
-				printk("0x%2.2x ", readw(p));
+				printk(KERN_DEBUG "0x%2.2x ", readw(p));
 				p += 2;
 			}
-			printk("\n");
+			printk(KERN_DEBUG "\n");
 		}
 	}
 
-    
 	link->dev = NULL;
 	link->state &= ~DEV_CONFIG_PENDING;
-    
 
 	if(mem_type == 1) {
 		mtd = do_map_probe("map_ram", &dev->pcmcia_map);
@@ -791,17 +788,17 @@ static void memory_config(dev_link_t *link)
 		mtd = do_map_probe("map_rom", &dev->pcmcia_map);
 	} else {
 		for(i = 0; i < sizeof(probes) / sizeof(char *); i++) {
-			DEBUG(1, "Trying %s\n", probes[i]);
+			DEBUG(1, "Trying %s", probes[i]);
 			mtd = do_map_probe(probes[i], &dev->pcmcia_map);
-			if(mtd) 
+			if(mtd)
 				break;
 			
-			DEBUG(1, "FAILED: %s\n", probes[i]);
+			DEBUG(1, "FAILED: %s", probes[i]);
 		}
 	}
 	
 	if(!mtd) {
-		DEBUG(1, "Cant find an MTD\n");
+		DEBUG(1, "Cant find an MTD");
 		memory_release((u_long)link);
 		return;
 	}
@@ -810,10 +807,10 @@ static void memory_config(dev_link_t *link)
 	mtd->module = THIS_MODULE;
 	dev->cardsize = mtd->size;
 
-	/* If the memory found is fits completely into the mapped PCMCIA window, 
+	/* If the memory found is fits completely into the mapped PCMCIA window,
 	   use the faster non-remapping read/write functions */
 	if(dev->cardsize <= dev->win_size) {
-		DEBUG(1, "Using non remapping memory functions\n");
+		DEBUG(1, "Using non remapping memory functions");
 		dev->pcmcia_map.map_priv_1 = (unsigned long)dev->win_base;
 		dev->pcmcia_map.map_priv_2 = (unsigned long)dev->win_size;
 		dev->pcmcia_map.read8 = pcmcia_read8;
@@ -825,50 +822,47 @@ static void memory_config(dev_link_t *link)
 	}
 
 	if(add_mtd_device(mtd)) {
-		printk("memory_mtd: Couldnt register MTD device\n");
+		err("Couldnt register MTD device");
 		memory_release((u_long)link);
 		return;
-	} 
-	DEBUG(1, "memory_config: mtd added @ %p mtd->priv = %p\n", mtd, mtd->priv);
+	}
+	DEBUG(1, "memory_config: mtd added @ %p mtd->priv = %p", mtd, mtd->priv);
 
 	return;
 
  cs_failed:
 	cs_error(link->handle, last_fn, last_ret);
-	printk("memory_mtd: CS Error, exiting\n");
+	err("CS Error, exiting");
 	memory_release((u_long)link);
 	return;
-} /* memory_config */
+}
 
 /*======================================================================
 
-After a card is removed, memory_release() will unregister the 
+After a card is removed, memory_release() will unregister the
 device, and release the PCMCIA configuration.  If the device is
 still open, this will be postponed until it is closed.
-    
+
 ======================================================================*/
 
 static void memory_release(u_long arg)
 {
 	dev_link_t *link = (dev_link_t *)arg;
 	memory_dev_t *dev = link->priv;
-	DEBUG(0, "memory_release(0x%p)\n", link);
+	DEBUG(3, "memory_release(0x%p)", link);
 
 	del_mtd_device(dev->mtd_info);
 	link->dev = NULL;
 
 	if (link->win) {
 		iounmap(dev->win_base);
-		printk("ReleaseWindow() called\n");
+		DEBUG(2, "ReleaseWindow() called");
 		CardServices(ReleaseWindow, link->win);
 	}
-
 	link->state &= ~DEV_CONFIG;
-    
 	if (link->state & DEV_STALE_LINK)
 		memory_detach(link);
-    
-} /* memory_release */
+}
 
 /*======================================================================
 
@@ -876,7 +870,7 @@ The card status event handler.  Mostly, this schedules other
 stuff to run after an event is received.  A CARD_REMOVAL event
 also sets some flags to discourage the driver from trying
 to talk to the card any more.
-    
+
 ======================================================================*/
 
 static int memory_event(event_t event, int priority,
@@ -884,8 +878,7 @@ static int memory_event(event_t event, int priority,
 {
 	dev_link_t *link = args->client_data;
 
-	DEBUG(1, "memory_event(0x%06x)\n", event);
-    
+	DEBUG(1, "memory_event(0x%06x)", event);
 	switch (event) {
 	case CS_EVENT_CARD_REMOVAL:
 		link->state &= ~DEV_PRESENT;
@@ -913,35 +906,33 @@ static int memory_event(event_t event, int priority,
 		break;
 	}
 	return 0;
-} /* memory_event */
+}
 
 
 /*====================================================================*/
 
-static int __init init_memory_mtd(void)
+static int __init init_pcmcia_mtd(void)
 {
 	servinfo_t serv;
-    
-	DEBUG(0, "%s\n", version);
-    
+
+	info(DRIVER_DESC " " DRIVER_VERSION);
 	CardServices(GetCardServicesInfo, &serv);
 	if (serv.Revision != CS_RELEASE_CODE) {
-		printk(KERN_NOTICE "memory_mtd: Card Services release "
-		       "does not match!\n");
-		//return -1;
+		err("Card Services release does not match!");
+		return -1;
 	}
 	register_pccard_driver(&dev_info, &memory_attach, &memory_detach);
 
 	if(buswidth && buswidth != 1 && buswidth != 2) {
-		printk("bad buswidth (%d), using default\n", buswidth);
+		info("bad buswidth (%d), using default", buswidth);
 		buswidth = 2;
 	}
 	if(force_size && (force_size < 1 || force_size > 64)) {
-		printk("bad force_size (%d), using default\n", force_size);
+		info("bad force_size (%d), using default", force_size);
 		force_size = 0;
 	}
 	if(mem_type && mem_type != 1 && mem_type != 2) {
-		printk("bad mem_type (%d), using default\n", mem_type);
+		info("bad mem_type (%d), using default", mem_type);
 		mem_type = 0;
 	}
 
@@ -949,12 +940,12 @@ static int __init init_memory_mtd(void)
 }
 
 
-static void __exit exit_memory_mtd(void)
+static void __exit exit_pcmcia_mtd(void)
 {
 	int i;
 	dev_link_t *link;
 
-	DEBUG(0, "memory_mtd: unloading\n");
+	DEBUG(1, "unloading");
 	unregister_pccard_driver(&dev_info);
 	for (i = 0; i < MAX_DEV; i++) {
 		link = dev_table[i];
@@ -966,5 +957,5 @@ static void __exit exit_memory_mtd(void)
 	}
 }
 
-module_init(init_memory_mtd);
-module_exit(exit_memory_mtd);
+module_init(init_pcmcia_mtd);
+module_exit(exit_pcmcia_mtd);
