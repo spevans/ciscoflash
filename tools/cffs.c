@@ -1,5 +1,5 @@
 /*
- * $Id: cffs.c,v 1.14 2002-07-04 15:13:57 spse Exp $
+ * $Id: cffs.c,v 1.15 2002-07-04 15:23:29 spse Exp $
  *
  *
  */
@@ -28,11 +28,9 @@
 #endif
 
 
+#include "fileheader.h"
 
-#include "../fs/fileheader.h"
 
-
-#define VERSION "0.03"
 #define COPYRIGHT "(C) Simon Evans 2002 (spse@secret.org.uk)"
 
 enum options {	none = 0, bad_options, dir, delete, erase, get, put, fsck, help, version };
