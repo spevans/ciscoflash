@@ -1,5 +1,5 @@
 /*
- * $Id: pcmcia_mtd.c,v 1.18 2002-06-05 16:39:45 spse Exp $
+ * $Id: pcmcia_mtd.c,v 1.19 2002-06-06 12:17:47 spse Exp $
  *
  * pcmcia_mtd.c - MTD driver for PCMCIA flash memory cards
  *
@@ -49,7 +49,7 @@ static const int debug = 0;
 
 
 #define DRIVER_DESC	"PCMCIA Flash memory card driver"
-#define DRIVER_VERSION	"$Revision: 1.18 $"
+#define DRIVER_VERSION	"$Revision: 1.19 $"
 /* Maximum number of separate memory devices we'll allow */
 #define MAX_DEV		4
 
@@ -588,8 +588,16 @@ static void memory_config(dev_link_t *link)
 		tuple.DesiredTuple = RETURN_FIRST_TUPLE;
 		rc = CardServices(GetFirstTuple, link->handle, &tuple);
 		while(rc == CS_SUCCESS) {
-			CS_CHECK(GetTupleData, link->handle, &tuple);
-			CS_CHECK(ParseTuple, link->handle, &tuple, &parse);
+			rc = CardServices(GetTupleData, link->handle, &tuple);
+			if(rc != CS_SUCCESS) {
+				cs_error(link->handle, GetTupleData, rc);
+				break;
+			}
+			rc = CardServices(ParseTuple, link->handle, &tuple, &parse);
+			if(rc != CS_SUCCESS) {
+				cs_error(link->handle, ParseTuple, rc);
+				break;
+			}
 
 			switch(tuple.TupleCode) {
 			case  CISTPL_FORMAT: {
@@ -856,9 +864,15 @@ static void memory_release(u_long arg)
 	DEBUG(3, "memory_release(0x%p)", link);
 
 	if(dev) {
-		del_mtd_device(dev->mtd_info);
+		if(dev->mtd_info) {
+			del_mtd_device(dev->mtd_info);
+			dev->mtd_info = NULL;
+		}
 		if (link->win) {
-			iounmap(dev->win_base);
+			if(dev->win_base) {
+				iounmap(dev->win_base);
+				dev->win_base = NULL;
+			}
 			DEBUG(2, "ReleaseWindow() called");
 			CardServices(ReleaseWindow, link->win);
 		}
