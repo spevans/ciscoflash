@@ -47,6 +47,9 @@ Version 0.03  (C) Simon Evans 2002 (spse@secret.org.uk)<br>
 </code>
 <p>
 <h3>Examples</h3>
+An MTD device must always be specified. A default is not coded in because on a lot of PDAs and
+embedded systems /dev/mtd/0 usually points to a boot loader or other important partition. In
+this case, a careless <i>cffs --erase</i> would be fatal!.
 <p>
 Directory Listing
 <p>
@@ -75,7 +78,7 @@ Deleting a file
     <address><a href="mailto:spse@secret.org.uk">Simon Evans</a></address>
 <!-- Created: Thu Jul  4 16:28:42 BST 2002 -->
 <!-- hhmts start -->
-Last modified: Thu Jul  4 17:26:47 BST 2002
+Last modified: Thu Jul  4 17:34:34 BST 2002
 <!-- hhmts end -->
   </body>
 </html>
