@@ -1,5 +1,5 @@
 /*
- * $Id: pcmciamtd.c,v 1.20 2002-06-30 03:24:58 spse Exp $
+ * $Id: pcmciamtd.c,v 1.21 2002-06-30 04:03:35 spse Exp $
  *
  * pcmcia_mtd.c - MTD driver for PCMCIA flash memory cards
  *
@@ -49,7 +49,7 @@ static const int debug = 0;
 
 
 #define DRIVER_DESC	"PCMCIA Flash memory card driver"
-#define DRIVER_VERSION	"$Revision: 1.20 $"
+#define DRIVER_VERSION	"$Revision: 1.21 $"
 /* Maximum number of separate memory devices we'll allow */
 #define MAX_DEV		4
 
@@ -71,11 +71,6 @@ typedef struct memory_dev_t {
 	struct mtd_info	*mtd_info;
 	char		mtd_name[sizeof(struct cistpl_vers_1_t)];
 } memory_dev_t;
-
-static void memory_release(u_long arg);
-static int memory_event(event_t event, int priority, event_callback_args_t *args);
-static dev_link_t *memory_attach(void);
-static void memory_detach(dev_link_t *);
 
 
 static dev_info_t dev_info = "pcmcia_mtd";
@@ -452,82 +447,21 @@ static void pcmcia_copy_to(struct map_info *map, unsigned long to, const void *f
 }
 
 
-
 /*======================================================================
 
-memory_attach() creates an "instance" of the driver, allocating
-local data structures for one device.  The device is registered
-with Card Services.
+After a card is removed, memory_release() will unregister the
+device, and release the PCMCIA configuration.  If the device is
+still open, this will be postponed until it is closed.
 
 ======================================================================*/
 
-static dev_link_t *memory_attach(void)
+static void memory_release(u_long arg)
 {
+	dev_link_t *link = (dev_link_t *)arg;
 	memory_dev_t *dev;
-	dev_link_t *link;
-	client_reg_t client_reg;
 	int i, ret;
 
-	DEBUG(2, "memory_attach()");
-	for (i = 0; i < MAX_DEV; i++)
-		if (dev_table[i] == NULL) break;
-	if (i == MAX_DEV) {
-		err("no devices available");
-		return NULL;
-	}
-
-	/* Create new memory card device */
-	dev = kmalloc(sizeof(*dev), GFP_KERNEL);
-	if (!dev) return NULL;
-	DEBUG(1, "memory_attach: dev = %p", dev);
-
-	memset(dev, 0, sizeof(*dev));
-	link = &dev->link; link->priv = dev;
-
-	link->release.function = &memory_release;
-	link->release.data = (u_long)link;
-
-	link->conf.Attributes = 0;
-	link->conf.IntType = INT_MEMORY;
-
-	dev_table[i] = link;
-
-	/* Register with Card Services */
-	client_reg.dev_info = &dev_info;
-	client_reg.Attributes = INFO_IO_CLIENT | INFO_CARD_SHARE;
-	client_reg.EventMask =
-		CS_EVENT_RESET_PHYSICAL | CS_EVENT_CARD_RESET |
-		CS_EVENT_CARD_INSERTION | CS_EVENT_CARD_REMOVAL |
-		CS_EVENT_PM_SUSPEND | CS_EVENT_PM_RESUME;
-	client_reg.event_handler = &memory_event;
-	client_reg.Version = 0x0210;
-	client_reg.event_callback_args.client_data = link;
-	DEBUG(2, "Calling RegisterClient");
-	ret = CardServices(RegisterClient, &link->handle, &client_reg);
-	if (ret != 0) {
-		cs_error(link->handle, RegisterClient, ret);
-		memory_detach(link);
-		return NULL;
-	}
-
-	return link;
-}
-
-/*======================================================================
-
-This deletes a driver "instance".  The device is de-registered
-with Card Services.  If it has been released, all local data
-structures are freed.  Otherwise, the structures will be freed
-when the device is released.
-
-======================================================================*/
-
-static void memory_detach(dev_link_t *link)
-{
-	int i, ret;
-	memory_dev_t *dev;
-
-	DEBUG(3, "memory_detach(0x%p)", link);
+	DEBUG(3, "memory_release(0x%p)", link);
 
 	/* Find device in table */
 	for (i = 0; i < MAX_DEV; i++)
@@ -536,36 +470,35 @@ static void memory_detach(dev_link_t *link)
 		DEBUG(1, "Cant find %p in dev_table", link);
 		return;
 	}
-	
-	del_timer(&link->release);
+
 	dev = link->priv;
 
-	if(!dev) {
-		DEBUG(3, "dev is NULL");
-		return;
+	if(dev) {
+		if(dev->mtd_info) {
+			del_mtd_device(dev->mtd_info);
+			dev->mtd_info = NULL;
+			MOD_DEC_USE_COUNT;
+		}
+		if (link->win) {
+			if(dev->win_base) {
+				iounmap(dev->win_base);
+				dev->win_base = NULL;
+			}
+			DEBUG(2, "ReleaseWindow() called");
+			CardServices(ReleaseWindow, link->win);
+		}
+		ret = CardServices(ReleaseConfiguration, link->handle);
+		if(ret != CS_SUCCESS)
+			cs_error(link->handle, ReleaseConfiguration, ret);
+			
 	}
-
-	if (link->state & DEV_CONFIG) {
-		//memory_release((u_long)link);
-		DEBUG(3, "DEV_CONFIG set");
-		link->state |= DEV_STALE_LINK;
-		return;
-	}
-
-	if (link->handle) {
-		DEBUG(2, "Deregistering with card services");
-		ret = CardServices(DeregisterClient, link->handle);
-		if (ret != CS_SUCCESS)
-			cs_error(link->handle, DeregisterClient, ret);
-	}
-	DEBUG(3, "Freeing dev (%p)", dev);
-	kfree(dev);
-	link->priv = NULL;
-	dev_table[i] = NULL;
+	link->state &= ~DEV_CONFIG;
 }
 
 
-void card_settings(memory_dev_t *dev, dev_link_t *link)
+
+
+static void card_settings(memory_dev_t *dev, dev_link_t *link)
 {
 	int rc;
 	tuple_t tuple;
@@ -885,53 +818,6 @@ static void memory_config(dev_link_t *link)
 	return;
 }
 
-/*======================================================================
-
-After a card is removed, memory_release() will unregister the
-device, and release the PCMCIA configuration.  If the device is
-still open, this will be postponed until it is closed.
-
-======================================================================*/
-
-static void memory_release(u_long arg)
-{
-	dev_link_t *link = (dev_link_t *)arg;
-	memory_dev_t *dev;
-	int i, ret;
-
-	DEBUG(3, "memory_release(0x%p)", link);
-
-	/* Find device in table */
-	for (i = 0; i < MAX_DEV; i++)
-		if (dev_table[i] == link) break;
-	if (i == MAX_DEV) {
-		DEBUG(1, "Cant find %p in dev_table", link);
-		return;
-	}
-
-	dev = link->priv;
-
-	if(dev) {
-		if(dev->mtd_info) {
-			del_mtd_device(dev->mtd_info);
-			dev->mtd_info = NULL;
-			MOD_DEC_USE_COUNT;
-		}
-		if (link->win) {
-			if(dev->win_base) {
-				iounmap(dev->win_base);
-				dev->win_base = NULL;
-			}
-			DEBUG(2, "ReleaseWindow() called");
-			CardServices(ReleaseWindow, link->win);
-		}
-		ret = CardServices(ReleaseConfiguration, link->handle);
-		if(ret != CS_SUCCESS)
-			cs_error(link->handle, ReleaseConfiguration, ret);
-			
-	}
-	link->state &= ~DEV_CONFIG;
-}
 
 /*======================================================================
 
@@ -982,6 +868,118 @@ static int memory_event(event_t event, int priority,
 	return 0;
 }
 
+/*======================================================================
+
+This deletes a driver "instance".  The device is de-registered
+with Card Services.  If it has been released, all local data
+structures are freed.  Otherwise, the structures will be freed
+when the device is released.
+
+======================================================================*/
+
+static void memory_detach(dev_link_t *link)
+{
+	int i, ret;
+	memory_dev_t *dev;
+
+	DEBUG(3, "memory_detach(0x%p)", link);
+
+	/* Find device in table */
+	for (i = 0; i < MAX_DEV; i++)
+		if (dev_table[i] == link) break;
+	if (i == MAX_DEV) {
+		DEBUG(1, "Cant find %p in dev_table", link);
+		return;
+	}
+	
+	del_timer(&link->release);
+	dev = link->priv;
+
+	if(!dev) {
+		DEBUG(3, "dev is NULL");
+		return;
+	}
+
+	if (link->state & DEV_CONFIG) {
+		//memory_release((u_long)link);
+		DEBUG(3, "DEV_CONFIG set");
+		link->state |= DEV_STALE_LINK;
+		return;
+	}
+
+	if (link->handle) {
+		DEBUG(2, "Deregistering with card services");
+		ret = CardServices(DeregisterClient, link->handle);
+		if (ret != CS_SUCCESS)
+			cs_error(link->handle, DeregisterClient, ret);
+	}
+	DEBUG(3, "Freeing dev (%p)", dev);
+	kfree(dev);
+	link->priv = NULL;
+	dev_table[i] = NULL;
+}
+
+
+
+/*======================================================================
+
+memory_attach() creates an "instance" of the driver, allocating
+local data structures for one device.  The device is registered
+with Card Services.
+
+======================================================================*/
+
+static dev_link_t *memory_attach(void)
+{
+	memory_dev_t *dev;
+	dev_link_t *link;
+	client_reg_t client_reg;
+	int i, ret;
+
+	DEBUG(2, "memory_attach()");
+	for (i = 0; i < MAX_DEV; i++)
+		if (dev_table[i] == NULL) break;
+	if (i == MAX_DEV) {
+		err("no devices available");
+		return NULL;
+	}
+
+	/* Create new memory card device */
+	dev = kmalloc(sizeof(*dev), GFP_KERNEL);
+	if (!dev) return NULL;
+	DEBUG(1, "memory_attach: dev = %p", dev);
+
+	memset(dev, 0, sizeof(*dev));
+	link = &dev->link; link->priv = dev;
+
+	link->release.function = &memory_release;
+	link->release.data = (u_long)link;
+
+	link->conf.Attributes = 0;
+	link->conf.IntType = INT_MEMORY;
+
+	dev_table[i] = link;
+
+	/* Register with Card Services */
+	client_reg.dev_info = &dev_info;
+	client_reg.Attributes = INFO_IO_CLIENT | INFO_CARD_SHARE;
+	client_reg.EventMask =
+		CS_EVENT_RESET_PHYSICAL | CS_EVENT_CARD_RESET |
+		CS_EVENT_CARD_INSERTION | CS_EVENT_CARD_REMOVAL |
+		CS_EVENT_PM_SUSPEND | CS_EVENT_PM_RESUME;
+	client_reg.event_handler = &memory_event;
+	client_reg.Version = 0x0210;
+	client_reg.event_callback_args.client_data = link;
+	DEBUG(2, "Calling RegisterClient");
+	ret = CardServices(RegisterClient, &link->handle, &client_reg);
+	if (ret != 0) {
+		cs_error(link->handle, RegisterClient, ret);
+		memory_detach(link);
+		return NULL;
+	}
+
+	return link;
+}
 
 /*====================================================================*/
 
