@@ -108,7 +108,25 @@ char *read_file(int fd, struct cffs_hdr *header, int *filelen)
 	*filelen = len;
 	return buf;
 }
-		
+
+
+int next_header_pos(int fd, struct cffs_hdr *header)
+{
+	off_t newpos = 0;
+
+	if(header->magic == CISCO_FH_MAGIC)
+		newpos = sizeof(ciscoflash_filehdr) + header->hdr.cfh.length;
+	else
+		newpos = sizeof(ciscoflash_filehdr_ext) + header->hdr.ecfh.length;
+
+	newpos += header->pos;
+	newpos = (newpos + 3) & ~3;
+	if(lseek(fd, newpos, SEEK_SET) == -1) {
+		perror("lseek: ");
+		return -1;
+	}
+	return 0;
+}
 		
 
 int read_header(int fd, struct cffs_hdr *header)
@@ -395,11 +413,11 @@ int main(int argc, char **argv)
 
 	fd = open(device, O_RDONLY);
 	if(fd == -1) {
-		fprintf(stderr, "cant open %s: %s\n", device, strerror(errno));
+		fprintf(stderr, "Bad device %s: %s\n", device, strerror(errno));
 		exit(1);
 	}
 	if(fstat(fd, &sinfo) == -1) {
-		fprintf(stderr, "cant stat %s: %s\n", device, strerror(errno));
+		fprintf(stderr, "Cant stat %s: %s\n", device, strerror(errno));
 		close(fd);
 		exit(1);
 	}
@@ -420,7 +438,8 @@ int main(int argc, char **argv)
 			if(!file_match(filecnt, files, &header))
 				dump_header(&header, calc_chk16(p, len));
 			free(p);
-			lseek(fd, ((len +3) & ~3) - len, SEEK_CUR);
+			if(next_header_pos(fd, &header) == -1)
+				goto error;
 		}
 	}
 
