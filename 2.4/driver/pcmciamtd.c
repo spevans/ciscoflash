@@ -1,5 +1,5 @@
 /*
- * $Id: pcmciamtd.c,v 1.29 2002-07-12 11:49:12 spse Exp $
+ * $Id: pcmciamtd.c,v 1.30 2002-08-01 14:16:30 spse Exp $
  *
  * pcmciamtd.c - MTD driver for PCMCIA flash memory cards
  *
@@ -45,7 +45,7 @@ static const int debug = 0;
 
 
 #define DRIVER_DESC	"PCMCIA Flash memory card driver"
-#define DRIVER_VERSION	"$Revision: 1.29 $"
+#define DRIVER_VERSION	"$Revision: 1.30 $"
 
 /* Size of the PCMCIA address space: 26 bits = 64 MB */
 #define MAX_PCMCIA_ADDR	0x4000000
@@ -58,7 +58,7 @@ typedef struct memory_dev_t {
 	struct list_head list;
 	dev_link_t	link;		/* PCMCIA link */
 	caddr_t		win_base;	/* ioremapped address of PCMCIA window */
-	unsigned int	win_size;	/* size of window (usually 64K) */
+	unsigned int	win_size;	/* size of window */
 	unsigned int	cardsize;	/* size of whole card */
 	unsigned int	offset;		/* offset into card the window currently points at */
 	unsigned int	memspeed;	/* memory access speed in ns */
@@ -464,7 +464,6 @@ static void card_settings(memory_dev_t *dev, dev_link_t *link, int *new_name)
 		DEBUG(2, "buswidth forced to %d", buswidth);
 	}		
 
-
 	dev->pcmcia_map.name = dev->mtd_name;
 	if(!dev->mtd_name[0]) {
 		strcpy(dev->mtd_name, "PCMCIA Memory card");
@@ -529,11 +528,9 @@ static void pcmciamtd_config(dev_link_t *link)
 	req.Base = 0;
 	req.AccessSpeed = mem_speed;
 	link->win = (window_handle_t)link->handle;
-	req.Size = MAX_PCMCIA_ADDR;
-	if(force_size)
-		req.Size = force_size << 20;
-
+	req.Size = (force_size) ? force_size << 20 : MAX_PCMCIA_ADDR;
 	dev->win_size = 0;
+
 	do {
 		int ret;
 		DEBUG(2, "requesting window with size = %dKB memspeed = %d",
@@ -780,8 +777,6 @@ static void pcmciamtd_detach(dev_link_t *link)
 	list_del(&dev->list);
 	link->priv = NULL;
 	kfree(dev);
-
-
 }
 
 
