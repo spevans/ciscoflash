@@ -38,29 +38,35 @@ uint16_t calc_crc16(uint8_t *buf, int len, uint16_t wcrc)
 }
 #else
 
-uint16_t calc_crc16(uint16_t *buf, int len, uint16_t wcrc)
+uint16_t calc_crc16(uint8_t *buf, int len, uint16_t wcrc)
 {
 	uint32_t crc = 0;
 	uint16_t d, *data;
 	
 	data = (uint16_t *)buf;
 
-	len /= 2;
-	while(len--) {
-		d = ~ntohs(*(buf++));
-		crc += d;
+	printf("len = %d\n", len);
+	while(len & ~1) {
+		d = ~ntohs(*(data++));
+		crc += (uint16_t)d;
 		crc = (crc & 0xffff) + (crc >> 16);
+		len -= 2;
 	}
-#if 0
+#if 1
 	if(len) {
-		d = *data;
-		d &= 0xff;
-		crc += ~d;
+		crc += (uint16_t)~(*buf << 8);
+/*
+		d = (*buf << 8) & 0xffff;
+		printf("Handling odd byte crc = 0x%8.8X d=0x%4.4X, ~d=0x%4.4X\n", crc, d, ~d);
+		
+		//d &= 0xff;
+		crc += (uint16_t)~d;
+*/
 		crc = (crc & 0xffff) + (crc >> 16);
 	}
 #endif
 		
-	printf("crc = 0x%8.8X, ~crc = 0x%8.8X\n", crc, ~crc);
+	//printf("crc = 0x%8.8X, ~crc = 0x%8.8X\n", crc, ~crc);
 	return (uint16_t)crc;
 }
 #endif
@@ -144,7 +150,7 @@ int main(int argc, char **argv)
 				memset(p, 0, hdr->length+3);
 				if(read(fd, p, hdr->length) != hdr->length)
 					goto error;
-				crc = (uint16_t)calc_crc16(p, (hdr->length+1) & ~1, hdr->crc);
+				crc = (uint16_t)calc_crc16(p, hdr->length, hdr->crc);
 				if(crc != hdr->crc)
 					printf("Bad CRC 0x%4.4X != 0x%4.4X\n", crc, hdr->crc);
 				free(p);
