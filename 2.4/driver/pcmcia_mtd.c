@@ -1,5 +1,5 @@
 /*
- * $Id: pcmcia_mtd.c,v 1.19 2002-06-06 12:17:47 spse Exp $
+ * $Id: pcmcia_mtd.c,v 1.20 2002-06-30 03:24:58 spse Exp $
  *
  * pcmcia_mtd.c - MTD driver for PCMCIA flash memory cards
  *
@@ -49,7 +49,7 @@ static const int debug = 0;
 
 
 #define DRIVER_DESC	"PCMCIA Flash memory card driver"
-#define DRIVER_VERSION	"$Revision: 1.19 $"
+#define DRIVER_VERSION	"$Revision: 1.20 $"
 /* Maximum number of separate memory devices we'll allow */
 #define MAX_DEV		4
 
@@ -486,8 +486,11 @@ static dev_link_t *memory_attach(void)
 
 	link->release.function = &memory_release;
 	link->release.data = (u_long)link;
+
+	link->conf.Attributes = 0;
+	link->conf.IntType = INT_MEMORY;
+
 	dev_table[i] = link;
-	//init_waitqueue_head(&dev->erase_pending);
 
 	/* Register with Card Services */
 	client_reg.dev_info = &dev_info;
@@ -521,162 +524,139 @@ when the device is released.
 
 static void memory_detach(dev_link_t *link)
 {
-	memory_dev_t *dev = link->priv;
+	int i, ret;
+	memory_dev_t *dev;
 
 	DEBUG(3, "memory_detach(0x%p)", link);
+
+	/* Find device in table */
+	for (i = 0; i < MAX_DEV; i++)
+		if (dev_table[i] == link) break;
+	if (i == MAX_DEV) {
+		DEBUG(1, "Cant find %p in dev_table", link);
+		return;
+	}
+	
+	del_timer(&link->release);
+	dev = link->priv;
+
 	if(!dev) {
 		DEBUG(3, "dev is NULL");
 		return;
 	}
 
 	if (link->state & DEV_CONFIG) {
+		//memory_release((u_long)link);
 		DEBUG(3, "DEV_CONFIG set");
 		link->state |= DEV_STALE_LINK;
 		return;
 	}
 
-	if (link->handle)
-		CardServices(DeregisterClient, link->handle);
+	if (link->handle) {
+		DEBUG(2, "Deregistering with card services");
+		ret = CardServices(DeregisterClient, link->handle);
+		if (ret != CS_SUCCESS)
+			cs_error(link->handle, DeregisterClient, ret);
+	}
 	DEBUG(3, "Freeing dev (%p)", dev);
 	kfree(dev);
 	link->priv = NULL;
-	/* Unlink device structure, free bits */
-
+	dev_table[i] = NULL;
 }
 
 
-/*======================================================================
-
-memory_config() is scheduled to run after a CARD_INSERTION event
-is received, to configure the PCMCIA socket, and to make the
-MTD device available to the system.
-
-======================================================================*/
-
-#define CS_CHECK(fn, args...) \
-while ((last_ret=CardServices(last_fn=(fn), args))!=0) goto cs_failed
-
-static void memory_config(dev_link_t *link)
+void card_settings(memory_dev_t *dev, dev_link_t *link)
 {
-	memory_dev_t *dev = link->priv;
-	struct mtd_info *mtd = NULL;
-	cs_status_t status;
-	win_req_t req;
-	int last_ret = 0, last_fn = 0;
-	int i,j;
-	config_info_t t;
-	config_req_t r;
-	static const char *probes[] = { "jedec_probe", "cfi_probe" };
-
-	DEBUG(3, "memory_config(0x%p)", link);
-
-	/* Configure card */
-	link->state |= DEV_CONFIG;
-
-
-#ifdef CISTPL_FORMAT_MEM
-	/* This is a hack, not a complete solution */
-	{
-		int rc;
-		tuple_t tuple;
-		cisparse_t parse;
-		u_char buf[64];
-		tuple.Attributes = TUPLE_RETURN_COMMON;
-		tuple.TupleData = (cisdata_t *)buf;
-		tuple.TupleDataMax = sizeof(buf);
-		tuple.TupleOffset = 0;
-		tuple.DesiredTuple = RETURN_FIRST_TUPLE;
-		rc = CardServices(GetFirstTuple, link->handle, &tuple);
-		while(rc == CS_SUCCESS) {
-			rc = CardServices(GetTupleData, link->handle, &tuple);
-			if(rc != CS_SUCCESS) {
-				cs_error(link->handle, GetTupleData, rc);
-				break;
-			}
-			rc = CardServices(ParseTuple, link->handle, &tuple, &parse);
-			if(rc != CS_SUCCESS) {
-				cs_error(link->handle, ParseTuple, rc);
-				break;
-			}
-
-			switch(tuple.TupleCode) {
-			case  CISTPL_FORMAT: {
-				cistpl_format_t *t = &parse.format;
-				DEBUG(2, "Format type: %u, Error Detection: %u, offset = %u, length =%u",
-				      t->type, t->edc, t->offset, t->length);
-				break;
-
-			}
-
-			case CISTPL_DEVICE: {
-				cistpl_device_t *t = &parse.device;
-				int i;
-				DEBUG(1, "Common memory:");
- 				dev->pcmcia_map.size = t->dev[0].size;
-				for(i = 0; i < t->ndev; i++) {
-					DEBUG(2, "Region %d, type = %u", i, t->dev[i].type);
-					DEBUG(2, "Region %d, wp = %u", i, t->dev[i].wp);
-					DEBUG(2, "Region %d, speed = %u ns", i, t->dev[i].speed);
-					DEBUG(2, "Region %d, size = %u bytes", i, t->dev[i].size);
-				}
-				break;
-			}
-
-			case CISTPL_VERS_1: {
-				cistpl_vers_1_t *t = &parse.version_1;
-				int i;
-				if(t->ns) {
-					dev->mtd_name[0] = '\0';
-					for(i = 0; i < t->ns; i++) {
-						if(i)
-							strcat(dev->mtd_name, " ");
-						strcat(dev->mtd_name, t->str+t->ofs[i]);
-					}
-				}
-				DEBUG(2, "Found name: %s", dev->mtd_name);
-				break;
-			}
-
-			case CISTPL_JEDEC_C: {
-				cistpl_jedec_t *t = &parse.jedec;
-				int i;
-				for(i = 0; i < t->nid; i++) {
-					DEBUG(2, "JEDEC: 0x%02x 0x%02x", t->id[i].mfr, t->id[i].info);
-				}
-				break;
-			}
-
-			case CISTPL_DEVICE_GEO: {
-				cistpl_device_geo_t *t = &parse.device_geo;
-				int i;
-				dev->pcmcia_map.buswidth = t->geo[0].buswidth;
-				for(i = 0; i < t->ngeo; i++) {
-					DEBUG(2, "region: %d buswidth = %u", i, t->geo[i].buswidth);
-					DEBUG(2, "region: %d erase_block = %u", i, t->geo[i].erase_block);
-					DEBUG(2, "region: %d read_block = %u", i, t->geo[i].read_block);
-					DEBUG(2, "region: %d write_block = %u", i, t->geo[i].write_block);
-					DEBUG(2, "region: %d partition = %u", i, t->geo[i].partition);
-					DEBUG(2, "region: %d interleave = %u", i, t->geo[i].interleave);
-				}
-				break;
-			}
-			
-			default:
-				DEBUG(1, "Unknown tuple code %d", tuple.TupleCode);
-			}
-				
-			rc = CardServices(GetNextTuple, link->handle, &tuple, &parse);
+	int rc;
+	tuple_t tuple;
+	cisparse_t parse;
+	u_char buf[64];
+	tuple.Attributes = 0;
+	tuple.TupleData = (cisdata_t *)buf;
+	tuple.TupleDataMax = sizeof(buf);
+	tuple.TupleOffset = 0;
+	tuple.DesiredTuple = RETURN_FIRST_TUPLE;
+	rc = CardServices(GetFirstTuple, link->handle, &tuple);
+	while(rc == CS_SUCCESS) {
+		rc = CardServices(GetTupleData, link->handle, &tuple);
+		if(rc != CS_SUCCESS) {
+			cs_error(link->handle, GetTupleData, rc);
+			break;
 		}
+		rc = CardServices(ParseTuple, link->handle, &tuple, &parse);
+		if(rc != CS_SUCCESS) {
+			cs_error(link->handle, ParseTuple, rc);
+			break;
+		}
+		
+		switch(tuple.TupleCode) {
+		case  CISTPL_FORMAT: {
+			cistpl_format_t *t = &parse.format;
+			DEBUG(2, "Format type: %u, Error Detection: %u, offset = %u, length =%u",
+			      t->type, t->edc, t->offset, t->length);
+			break;
+			
+		}
+			
+		case CISTPL_DEVICE: {
+			cistpl_device_t *t = &parse.device;
+			int i;
+			DEBUG(1, "Common memory:");
+			dev->pcmcia_map.size = t->dev[0].size;
+			for(i = 0; i < t->ndev; i++) {
+				DEBUG(2, "Region %d, type = %u", i, t->dev[i].type);
+				DEBUG(2, "Region %d, wp = %u", i, t->dev[i].wp);
+				DEBUG(2, "Region %d, speed = %u ns", i, t->dev[i].speed);
+				DEBUG(2, "Region %d, size = %u bytes", i, t->dev[i].size);
+			}
+			break;
+		}
+			
+		case CISTPL_VERS_1: {
+			cistpl_vers_1_t *t = &parse.version_1;
+			int i;
+			if(t->ns) {
+				dev->mtd_name[0] = '\0';
+				for(i = 0; i < t->ns; i++) {
+					if(i)
+						strcat(dev->mtd_name, " ");
+					strcat(dev->mtd_name, t->str+t->ofs[i]);
+				}
+			}
+			DEBUG(2, "Found name: %s", dev->mtd_name);
+			break;
+		}
+			
+		case CISTPL_JEDEC_C: {
+			cistpl_jedec_t *t = &parse.jedec;
+			int i;
+			for(i = 0; i < t->nid; i++) {
+				DEBUG(2, "JEDEC: 0x%02x 0x%02x", t->id[i].mfr, t->id[i].info);
+			}
+			break;
+		}
+			
+		case CISTPL_DEVICE_GEO: {
+			cistpl_device_geo_t *t = &parse.device_geo;
+			int i;
+			dev->pcmcia_map.buswidth = t->geo[0].buswidth;
+			for(i = 0; i < t->ngeo; i++) {
+				DEBUG(2, "region: %d buswidth = %u", i, t->geo[i].buswidth);
+				DEBUG(2, "region: %d erase_block = %u", i, t->geo[i].erase_block);
+				DEBUG(2, "region: %d read_block = %u", i, t->geo[i].read_block);
+				DEBUG(2, "region: %d write_block = %u", i, t->geo[i].write_block);
+				DEBUG(2, "region: %d partition = %u", i, t->geo[i].partition);
+				DEBUG(2, "region: %d interleave = %u", i, t->geo[i].interleave);
+			}
+			break;
+		}
+			
+		default:
+			DEBUG(1, "Unknown tuple code %d", tuple.TupleCode);
+		}
+		
+		rc = CardServices(GetNextTuple, link->handle, &tuple, &parse);
 	}
-#endif
-
-	dev->pcmcia_map.read8 = pcmcia_read8_remap;
-	dev->pcmcia_map.read16 = pcmcia_read16_remap;
-	dev->pcmcia_map.copy_from = pcmcia_copy_from_remap;
-	dev->pcmcia_map.write8 = pcmcia_write8_remap;
-	dev->pcmcia_map.write16 = pcmcia_write16_remap;
-	dev->pcmcia_map.copy_to = pcmcia_copy_to_remap;
-
 	if(!dev->pcmcia_map.size)
 		dev->pcmcia_map.size = MAX_PCMCIA_ADDR;
 
@@ -699,14 +679,63 @@ static void memory_config(dev_link_t *link)
 	if(!dev->mtd_name[0])
 		strcpy(dev->mtd_name, "PCMCIA Memory card");
 
-
 	DEBUG(1, "Device: Size: %lu Width:%d Name: %s",
 	      dev->pcmcia_map.size, dev->pcmcia_map.buswidth << 3, dev->mtd_name);
+}
+
+
+/*======================================================================
+
+memory_config() is scheduled to run after a CARD_INSERTION event
+is received, to configure the PCMCIA socket, and to make the
+MTD device available to the system.
+
+======================================================================*/
+
+#define CS_CHECK(fn, args...) \
+while ((last_ret=CardServices(last_fn=(fn), args))!=0) goto cs_failed
+
+static void memory_config(dev_link_t *link)
+{
+	memory_dev_t *dev = link->priv;
+	struct mtd_info *mtd = NULL;
+	cs_status_t status;
+	win_req_t req;
+	int last_ret = 0, last_fn = 0;
+	int ret;
+	int i,j;
+	config_info_t t;
+	config_req_t r;
+	static const char *probes[] = { "jedec_probe", "cfi_probe" };
+	cisinfo_t cisinfo;
+
+	DEBUG(3, "memory_config(0x%p)", link);
+
+	/* Configure card */
+	link->state |= DEV_CONFIG;
+
+	DEBUG(2, "Validating CIS");
+	ret = CardServices(ValidateCIS, link->handle, &cisinfo);
+	if(ret != CS_SUCCESS) {
+		cs_error(link->handle, GetTupleData, ret);
+	} else {
+		DEBUG(2, "ValidateCIS found %d chains", cisinfo.Chains);
+	}
+
+
+	card_settings(dev, link);
+
+	dev->pcmcia_map.read8 = pcmcia_read8_remap;
+	dev->pcmcia_map.read16 = pcmcia_read16_remap;
+	dev->pcmcia_map.copy_from = pcmcia_copy_from_remap;
+	dev->pcmcia_map.write8 = pcmcia_write8_remap;
+	dev->pcmcia_map.write16 = pcmcia_write16_remap;
+	dev->pcmcia_map.copy_to = pcmcia_copy_to_remap;
+
 
 	/* Allocate a small memory window for direct access */
 	req.Attributes =  WIN_MEMORY_TYPE_CM | WIN_ENABLE;
 	req.Attributes |= (dev->pcmcia_map.buswidth == 1) ? WIN_DATA_WIDTH_8 : WIN_DATA_WIDTH_16;
-
 
 	/* Request a memory window for PCMCIA. Some architeures can map windows upto the maximum
 	   that PCMCIA can support (64Mb) - this is ideal and we aim for a window the size of the
@@ -728,18 +757,23 @@ static void memory_config(dev_link_t *link)
 		ret = CardServices(RequestWindow, &link->win, &req);
 		DEBUG(2, "ret = %d dev->win_size = %d", ret, dev->win_size);
 		if(ret) {
-			cs_error(link->handle, RequestWindow, ret);
 			req.Size >>= 1;
 		} else {
 			DEBUG(2, "Got window of size %dKB", req.Size >> 10);
 			dev->win_size = req.Size;
 			break;
 		}
-	} while(req.Size >= 0x10000);
-	DEBUG(2, "dev->win_size = %d", dev->win_size);
-	if(!dev->win_size)
-		goto cs_failed;
+	} while(req.Size >= 0x1000);
 
+	DEBUG(2, "dev->win_size = %d", dev->win_size);
+
+	if(!dev->win_size) {
+		err("Cant allocate memory window");
+		memory_release((u_long)link);
+		return;
+	}
+	DEBUG(1, "Allocated a window of %dKB", dev->win_size >> 10);
+		
 	/* Get write protect status */
 	CS_CHECK(GetStatus, link->handle, &status);
 	DEBUG(1, "status value: 0x%x", status.CardState);
@@ -747,7 +781,6 @@ static void memory_config(dev_link_t *link)
 	dev->win_base = ioremap(req.Base, req.Size);
 	DEBUG(1, "mapped window dev = %p req.base = 0x%lx base = %p size = 0x%x",
 	      dev, req.Base, dev->win_base, req.Size);
-	dev->win_size = req.Size;
 	dev->cardsize = 0;
 	dev->offset = 0;
 
@@ -783,9 +816,9 @@ static void memory_config(dev_link_t *link)
 		char *p = dev->win_base;
 		for(i = 0; i < 16; i++) {
 			printk(KERN_DEBUG "pcmcia_mtd: 0x%4.4x: ", i << 4);
-			for(j = 0; j < 8; j++) {
-				printk(KERN_DEBUG "0x%2.2x ", readw(p));
-				p += 2;
+			for(j = 0; j < 16; j++) {
+				printk(KERN_DEBUG "0x%2.2x ", readb(p));
+				p += 1;
 			}
 			printk(KERN_DEBUG "\n");
 		}
@@ -833,7 +866,10 @@ static void memory_config(dev_link_t *link)
 		dev->pcmcia_map.copy_to = pcmcia_copy_to;
 	}
 
+	MOD_INC_USE_COUNT;
 	if(add_mtd_device(mtd)) {
+		dev->mtd_info = NULL;
+		MOD_DEC_USE_COUNT;
 		err("Couldnt register MTD device");
 		memory_release((u_long)link);
 		return;
@@ -860,13 +896,26 @@ still open, this will be postponed until it is closed.
 static void memory_release(u_long arg)
 {
 	dev_link_t *link = (dev_link_t *)arg;
-	memory_dev_t *dev = link->priv;
+	memory_dev_t *dev;
+	int i, ret;
+
 	DEBUG(3, "memory_release(0x%p)", link);
+
+	/* Find device in table */
+	for (i = 0; i < MAX_DEV; i++)
+		if (dev_table[i] == link) break;
+	if (i == MAX_DEV) {
+		DEBUG(1, "Cant find %p in dev_table", link);
+		return;
+	}
+
+	dev = link->priv;
 
 	if(dev) {
 		if(dev->mtd_info) {
 			del_mtd_device(dev->mtd_info);
 			dev->mtd_info = NULL;
+			MOD_DEC_USE_COUNT;
 		}
 		if (link->win) {
 			if(dev->win_base) {
@@ -876,10 +925,12 @@ static void memory_release(u_long arg)
 			DEBUG(2, "ReleaseWindow() called");
 			CardServices(ReleaseWindow, link->win);
 		}
+		ret = CardServices(ReleaseConfiguration, link->handle);
+		if(ret != CS_SUCCESS)
+			cs_error(link->handle, ReleaseConfiguration, ret);
+			
 	}
 	link->state &= ~DEV_CONFIG;
-	if (link->state & DEV_STALE_LINK)
-		memory_detach(link);
 }
 
 /*======================================================================
@@ -899,29 +950,34 @@ static int memory_event(event_t event, int priority,
 	DEBUG(1, "memory_event(0x%06x)", event);
 	switch (event) {
 	case CS_EVENT_CARD_REMOVAL:
+		DEBUG(2, "EVENT_CARD_REMOVAL");
 		link->state &= ~DEV_PRESENT;
 		if (link->state & DEV_CONFIG)
 			mod_timer(&link->release, jiffies + HZ/20);
 		break;
 	case CS_EVENT_CARD_INSERTION:
+		DEBUG(2, "EVENT_CARD_INSERTION");
 		link->state |= DEV_PRESENT | DEV_CONFIG_PENDING;
 		memory_config(link);
 		break;
-	case CS_EVENT_ERASE_COMPLETE:
-		break;
-
 	case CS_EVENT_PM_SUSPEND:
+		DEBUG(2, "EVENT_PM_SUSPEND");
 		link->state |= DEV_SUSPEND;
 		/* Fall through... */
 	case CS_EVENT_RESET_PHYSICAL:
+		DEBUG(2, "EVENT_RESET_PHYSICAL");
 		/* get_lock(link); */
 		break;
 	case CS_EVENT_PM_RESUME:
+		DEBUG(2, "EVENT_PM_RESUME");
 		link->state &= ~DEV_SUSPEND;
 		/* Fall through... */
 	case CS_EVENT_CARD_RESET:
+		DEBUG(2, "EVENT_CARD_RESET");
 		/* free_lock(link); */
 		break;
+	default:
+		DEBUG(2, "Unknown event %d", event);
 	}
 	return 0;
 }
