@@ -1,6 +1,6 @@
 
 /*
- * $Id: inode.c,v 1.2 2002-05-21 14:39:58 spse Exp $
+ * $Id: inode.c,v 1.3 2002-05-21 15:54:42 spse Exp $
  */
 
 
@@ -13,9 +13,6 @@
 
 #include <linux/mtd/compatmac.h>
 #include <linux/mtd/mtd.h>                                             
-
-#include "infoblock.h"
-#include "fileheader.h"
 
 #if CONFIG_MODVERSION==1
 #define MODVERSIONS
@@ -33,6 +30,11 @@ static int ciscoffs_readdir(struct file *filp, void *dirent, filldir_t filldir);
 static int ciscoffs_readpage(struct file *file, struct page *page);
 static struct dentry *
 ciscoffs_lookup(struct inode *dir, struct dentry *dentry);
+
+#define CISCO_FH_EXT_MAGIC 0x07158805
+#define CISCO_FH_EXT_MAGIC_SWAP 0x15070588
+#define CISCO_FH_MAGIC 0xBAD00B1E
+#define CICSO_FH_MAGIC_SWAP 0xD0BA1E0B
 
 typedef struct {
 	int	magic;		/* 0xBAD00B1E */
@@ -361,7 +363,7 @@ static DECLARE_FSTYPE_DEV(ciscoffs_fs_type, "ciscoffs", ciscoffs_read_super);
 
 mod_init_t init_ciscoffs_fs(void)
 {
-	printk("ciscoffs: $Revision: 1.2 $\n");
+	printk("ciscoffs: $Revision: 1.3 $\n");
 	return register_filesystem(&ciscoffs_fs_type);
 }
 
