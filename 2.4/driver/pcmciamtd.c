@@ -1,5 +1,5 @@
 /*
- * $Id: pcmciamtd.c,v 1.24 2002-07-03 13:33:36 spse Exp $
+ * $Id: pcmciamtd.c,v 1.25 2002-07-10 12:33:44 spse Exp $
  *
  * pcmciamtd.c - MTD driver for PCMCIA flash memory cards
  *
@@ -34,7 +34,7 @@ MODULE_PARM_DESC(debug, "Set Debug Level 0 = quiet, 5 = noisy");
 #undef DEBUG
 #define DEBUG(n, format, arg...) \
 	if (n <= debug) {	 \
-		printk(KERN_DEBUG __FILE__ ":" __FUNCTION__ "(): " format "\n", ## arg); \
+		printk(KERN_DEBUG __FILE__ ":%s(): " format "\n", __FUNCTION__ , ## arg); \
 	}
 
 #else
@@ -48,7 +48,7 @@ static const int debug = 0;
 
 
 #define DRIVER_DESC	"PCMCIA Flash memory card driver"
-#define DRIVER_VERSION	"$Revision: 1.24 $"
+#define DRIVER_VERSION	"$Revision: 1.25 $"
 
 /* Size of the PCMCIA address space: 26 bits = 64 MB */
 #define MAX_PCMCIA_ADDR	0x4000000
@@ -122,8 +122,11 @@ static void inline cs_error(client_handle_t handle, int func, int ret)
 /* Map driver */
 
 
-static inline int remap_window(memory_dev_t *dev, window_handle_t win, unsigned long to)
+static caddr_t remap_window(struct map_info *map, unsigned long to)
 {
+	memory_dev_t *dev = (memory_dev_t *)map->map_priv_1;
+	window_handle_t win = (window_handle_t)map->map_priv_2;
+
 	memreq_t mrq;
 	int ret;
 
@@ -134,44 +137,40 @@ static inline int remap_window(memory_dev_t *dev, window_handle_t win, unsigned 
 		mrq.Page = 0;
 		if( (ret = CardServices(MapMemPage, win, &mrq)) != CS_SUCCESS) {
 			cs_error(dev->link.handle, MapMemPage, ret);
-			return -1;
+			return NULL;
 		}
 		dev->offset = mrq.CardOffset;
 	}
-	return 0;
+	return dev->win_base + (to & PCMCIA_BYTE_MASK(dev->win_size));
 }
 
 
 static u8 pcmcia_read8_remap(struct map_info *map, unsigned long ofs)
 {
-	memory_dev_t *dev = (memory_dev_t *)map->map_priv_1;
-	window_handle_t win = (window_handle_t)map->map_priv_2;
+	caddr_t addr;
 	u8 d;
 
-	if(remap_window(dev, win, ofs) == -1)
+	addr = remap_window(map, ofs);
+	if(!addr)
 		return 0;
 
-	d = readb((dev->win_base) + (ofs & PCMCIA_BYTE_MASK(dev->win_size)));
-	DEBUG(3, "ofs = 0x%08lx (%p) data = 0x%02x", ofs,
-	      (dev->win_base)+(ofs & PCMCIA_BYTE_MASK(dev->win_size)), d);
-
+	d = readb(addr);
+	DEBUG(3, "ofs = 0x%08lx (%p) data = 0x%02x", ofs, addr, d);
 	return d;
 }
 
 
 static u16 pcmcia_read16_remap(struct map_info *map, unsigned long ofs)
 {
-	memory_dev_t *dev = (memory_dev_t *)map->map_priv_1;
-	window_handle_t win = (window_handle_t)map->map_priv_2;
+	caddr_t addr;
 	u16 d;
 
-	if(remap_window(dev, win, ofs) == -1)
+	addr = remap_window(map, ofs);
+	if(!addr)
 		return 0;
 
-	d = readw((dev->win_base)+(ofs & PCMCIA_BYTE_MASK(dev->win_size)));
-	DEBUG(3, "ofs = 0x%08lx (%p) data = 0x%04x", ofs,
-	      (dev->win_base)+(ofs & PCMCIA_BYTE_MASK(dev->win_size)), d);
-
+	d = readw(addr);
+	DEBUG(3, "ofs = 0x%08lx (%p) data = 0x%04x", ofs, addr, d);
 	return d;
 }
 
@@ -179,7 +178,6 @@ static u16 pcmcia_read16_remap(struct map_info *map, unsigned long ofs)
 static void pcmcia_copy_from_remap(struct map_info *map, void *to, unsigned long from, ssize_t len)
 {
 	memory_dev_t *dev = (memory_dev_t *)map->map_priv_1;
-	window_handle_t win = (window_handle_t)map->map_priv_2;
 
 	DEBUG(3, "to = %p from = %lu len = %u", to, from, len);
 	while(len) {
@@ -191,7 +189,7 @@ static void pcmcia_copy_from_remap(struct map_info *map, void *to, unsigned long
 		DEBUG(4, "from = 0x%8.8lx len = %u toread = %ld offset = 0x%8.8lx",
 		      (long)from, (unsigned int)len, (long)toread, from & ~PCMCIA_BYTE_MASK(dev->win_size));
 
-		if(remap_window(dev, win, from) == -1)
+		if(!remap_window(map, from))
 			return;
 
 		// Handle odd byte on 16bit bus
@@ -211,7 +209,7 @@ static void pcmcia_copy_from_remap(struct map_info *map, void *to, unsigned long
 			tocpy &= PCMCIA_WORD_MASK(dev->win_size);
 
 		DEBUG(4, "memcpy from %p to %p len = %d",
-		      dev->win_base + (from & PCMCIA_WORD_MASK(dev->win_size)), to, tocpy);
+		      dev->win_base + (from & PCMCIA_BYTE_MASK(dev->win_size)), to, tocpy);
 		memcpy_fromio(to, (dev->win_base) + (from & PCMCIA_BYTE_MASK(dev->win_size)), tocpy);
 		len -= tocpy;
 		to += tocpy;
@@ -236,36 +234,30 @@ static void pcmcia_copy_from_remap(struct map_info *map, void *to, unsigned long
 
 static void pcmcia_write8_remap(struct map_info *map, u8 d, unsigned long adr)
 {
-	memory_dev_t *dev = (memory_dev_t *)map->map_priv_1;
-	window_handle_t win = (window_handle_t)map->map_priv_2;
+	caddr_t addr = remap_window(map, adr);
 
-	if(remap_window(dev, win, adr) == -1)
+	if(!addr)
 		return;
 
-	DEBUG(3, "adr = 0x%08lx (%p)  data = 0x%02x", adr,
-	      (dev->win_base)+(adr & PCMCIA_BYTE_MASK(dev->win_size)), d);
-	writeb(d, (dev->win_base)+(adr & PCMCIA_BYTE_MASK(dev->win_size)));
+	DEBUG(3, "adr = 0x%08lx (%p)  data = 0x%02x", adr, addr, d);
+	writeb(d, addr);
 }
 
 
 static void pcmcia_write16_remap(struct map_info *map, u16 d, unsigned long adr)
 {
-	memory_dev_t *dev = (memory_dev_t *)map->map_priv_1;
-	window_handle_t win = (window_handle_t)map->map_priv_2;
-
-	if(remap_window(dev, win, adr) == -1)
+	caddr_t addr = remap_window(map, adr);
+	if(!addr)
 		return;
 
-	DEBUG(3, "adr = 0x%08lx (%p)  data = 0x%04x", adr,
-	      (dev->win_base)+(adr & PCMCIA_BYTE_MASK(dev->win_size)), d);
-	writew(d, (dev->win_base)+(adr & PCMCIA_BYTE_MASK(dev->win_size)));
+	DEBUG(3, "adr = 0x%08lx (%p)  data = 0x%04x", adr, addr, d);
+	writew(d, addr);
 }
 
 
 static void pcmcia_copy_to_remap(struct map_info *map, unsigned long to, const void *from, ssize_t len)
 {
 	memory_dev_t *dev = (memory_dev_t *)map->map_priv_1;
-	window_handle_t win = (window_handle_t)map->map_priv_2;
 
 	DEBUG(3, "to = %lu from = %p len = %u", to, from, len);
 	while(len) {
@@ -277,7 +269,7 @@ static void pcmcia_copy_to_remap(struct map_info *map, unsigned long to, const v
 		DEBUG(4, "to = 0x%8.8lx len = %u towrite = %d offset = 0x%8.8lx",
 		      to, len, towrite, to & ~PCMCIA_BYTE_MASK(dev->win_size));
 
-		if(remap_window(dev, win, to) == -1)
+		if(!remap_window(map, to))
 			return;
 
 		// Handle odd byte on 16bit bus
@@ -301,7 +293,7 @@ static void pcmcia_copy_to_remap(struct map_info *map, unsigned long to, const v
 
 
 		DEBUG(4, "memcpy from %p to %p len = %d",
-		      from, dev->win_base + (to & PCMCIA_WORD_MASK(dev->win_size)), tocpy);
+		      from, dev->win_base + (to & PCMCIA_BYTE_MASK(dev->win_size)), tocpy);
 		memcpy_toio((dev->win_base) + (to & PCMCIA_BYTE_MASK(dev->win_size)), from, tocpy);
 		len -= tocpy;
 		to += tocpy;
@@ -999,7 +991,6 @@ static int __init init_pcmciamtd(void)
 		err("Card Services release does not match!");
 		return -1;
 	}
-	register_pccard_driver(&dev_info, &memory_attach, &memory_detach);
 
 	if(buswidth && buswidth != 1 && buswidth != 2) {
 		info("bad buswidth (%d), using default", buswidth);
@@ -1014,6 +1005,7 @@ static int __init init_pcmciamtd(void)
 		mem_type = 0;
 	}
 
+	register_pccard_driver(&dev_info, &memory_attach, &memory_detach);
 	return 0;
 }
 
