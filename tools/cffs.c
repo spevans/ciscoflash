@@ -6,6 +6,7 @@
 #include <errno.h>
 #include <time.h>
 #include <stdint.h>
+#include <fnmatch.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <netinet/in.h> 
@@ -60,11 +61,65 @@ uint16_t calc_chk16(uint8_t *buf, int len)
 }
 
 
+int file_match(int filecnt, char **files, struct cffs_hdr *header)
+{
+	char *name;
+	if(!filecnt)
+		return 0;
+
+	name = header->magic == CISCO_FH_MAGIC ? header->hdr.cfh.name : header->hdr.ecfh.name;
+
+	while(filecnt--) {
+		if(!fnmatch(*files, name, 0))
+			return 0;
+	}
+	return 1;
+}
+
+
+char *read_file(int fd, struct cffs_hdr *header, int *filelen) 
+{
+	int len, hlen;
+	char *buf;
+	
+	*filelen = 0;
+
+	if(header->magic == CISCO_FH_MAGIC) {
+		len = header->hdr.cfh.length;
+		hlen = sizeof(ciscoflash_filehdr);
+	} else {
+		len = header->hdr.ecfh.length;
+		hlen = sizeof(ciscoflash_filehdr_ext);
+	}
+	if(lseek(fd, header->pos+hlen, SEEK_SET) == -1) {
+		perror("lseek: ");
+		return NULL;
+	}
+
+	buf = malloc(len);
+	if(!buf)
+		return NULL;
+
+	if(read(fd, buf, len) == -1) {
+		perror("read: ");
+		free(buf);
+		return NULL;
+	}
+	*filelen = len;
+	return buf;
+}
+		
+		
+
 int read_header(int fd, struct cffs_hdr *header)
 {
 	char buf[sizeof(struct cffs_hdr)];
 
 	memset(buf, 0, sizeof(struct cffs_hdr));
+	header->pos = lseek(fd, 0, SEEK_CUR);
+	if(header->pos == -1)
+		return -1;
+
 	if(read(fd, &buf, sizeof(header->magic)) < sizeof(header->magic))
 		return -1;
 	
@@ -359,16 +414,11 @@ int main(int argc, char **argv)
 				eof = 1;
 				continue;
 			}
-			len = (header.magic == CISCO_FH_MAGIC) ? header.hdr.cfh.length : 
-				header.hdr.ecfh.length;
-
-			p = malloc(len);
-			//memset(p, 0, len);
+			p = read_file(fd, &header, &len);
 			if(!p)
 				goto error;
-			if(read(fd, p, len) != len)
-				goto error;
-			dump_header(&header, calc_chk16(p, len));
+			if(!file_match(filecnt, files, &header))
+				dump_header(&header, calc_chk16(p, len));
 			free(p);
 			lseek(fd, ((len +3) & ~3) - len, SEEK_CUR);
 		}
