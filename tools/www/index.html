@@ -22,29 +22,32 @@
 	<li>fsck - Check file checksums and check blank space is properly erased.
 	
 	<h2>Supported Filesystems</h2>
-	There are different Cisco flash file systems, currently this supports the simplest
-	one fully (as used on 1600 routers).<p>
-	Other file systems will be get added if I get access to images of the cards to decode.
+	There are three different Cisco flash file systems (Class A, B and C).<br>
+	See <a href="http://www.cisco.com/warp/public/63/pcmciamatrix.html">
+	PCMCIA Filesystem Compatibility Matrix and Filesystem Information</a> for information on
+	which filesystems on used on which routers.<br>
+	See <a href="http://www.cisco.com/univercd/cc/td/doc/product/software/ios120/12cgcr/fun_c/fcprt2/fcifs.htm">
+	Using the Cisco IOS File System</a> for more information on cisco flash IOS commands.<br>
+	<p>
+			  
+	This program fully supports Class B and partially supports Class A.<br>
 
 	<h2>Usage</h2>
-<code>
-cffs - cisco flash file system reader<br>
-Version 0.03  (C) Simon Evans 2002 (spse@secret.org.uk)<br>
-
-
-<table>
-<tr><td colspan=3>Usage: cffs &lt;device&gt; &lt;option&gt; [files...]</td><td></td></tr>
-<tr><td width=10%></td><td width=25%>&lt;device&gt;</td><td>MTD Char device (eg /dev/mtd/0)</td></tr>
-<tr><td></td><td>-l, --dir</td><td>List files</td></tr>
-<tr><td></td><td>-d, --delete</td><td>Delete files</td></tr>
-<tr><td></td><td>-e, --erase</td><td>Erase flash</td></tr>
-<tr><td></td><td>-g, --get</td><td>Get files from flash</td></tr>
-<tr><td></td><td>-p, --put</td><td>Put files onto flash</td></tr>
-<tr><td></td><td>-f, --fsck</td><td>Check file system</td></tr>
-<tr><td></td><td>-h, --help</td><td>Usage information</td></tr>
-<tr><td></td><td>-v, --version</td><td>Show version</td></tr>
-</table>
-</code>
+<pre>
+cffs - cisco flash file system reader
+Version 0.05  (C) Simon Evans 2002 (spse@secret.org.uk)
+Usage: cffs &lt;device&gt; &lt;option&gt; [files...]
+        &lt;device&gt;  MTD Char device (eg /dev/mtd/0)
+        -l, --dir       List files
+        -d, --delete    Delete files
+        -e, --erase     Erase flash
+        -g, --get       Get files from flash
+        -p, --put       Put files onto flash
+        -f, --fsck      Check file system
+        -h, --help      Usage information
+        -v, --version   Show version
+</pre>
+<a href="cffs.1.html">Manual Page</a>
 <p>
 <h3>Examples</h3>
 An MTD device must always be specified. A default is not coded in because on a lot of PDAs and
@@ -53,32 +56,32 @@ this case, a careless <i>cffs --erase</i> would be fatal!.
 <p>
 Directory Listing
 <p>
-<code>
-% ./cffs /dev/mtd/0 --dir<br>
-       880   &lt;no date&gt;  [5B8E] [FFFF] running-config<br>
-       856   &lt;no date&gt;  [E2DC] [FFFF] startup-config<br>
-%<br>
-</code>
+<pre>
+% ./cffs /dev/mtd/0 --dir
+	880   &lt;no date&gt;  [5B8E] [FFFF] running-config
+	856   &lt;no date&gt;  [E2DC] [FFFF] startup-config
+%
+</pre>
 <p>
 Deleting a file
 <p>
-<code>
-% ./cffs /dev/mtd/0 --delete running-config<br>
-% ./cffs --dir<br>
-	880   &lt;no date&gt;  [5B8E] [FFFE] running-config [deleted]<br>
-	856   &lt;no date&gt;  [E2DC] [FFFF] startup-config<br>
-%<br>
-</code>
+<pre>
+% ./cffs /dev/mtd/0 --delete running-config
+% ./cffs --dir
+	880   &lt;no date&gt;  [5B8E] [FFFE] running-config [deleted]
+	856   &lt;no date&gt;  [E2DC] [FFFF] startup-config
+%
+</pre>
 <p>
 
 	<h2>Download</h2>
-	Current Version is 0.04<br><a href="cffs-0.04.tgz">cffs-0.04.tgz</a><br>
+	Current Version is 0.05<br><a href="cffs-0.05.tgz">cffs-0.05.tgz</a><br>
 
     <hr>
     <address><a href="mailto:spse@secret.org.uk">Simon Evans</a></address>
 <!-- Created: Thu Jul  4 16:28:42 BST 2002 -->
 <!-- hhmts start -->
-Last modified: Thu Jul  4 18:02:33 BST 2002
+Last modified: Sun Jul  7 15:52:03 BST 2002
 <!-- hhmts end -->
   </body>
 </html>
