@@ -1,5 +1,5 @@
 /* 
- * $Id: pcmcia_mtd.c,v 1.6 2002-05-21 12:20:43 spse Exp $
+ * $Id: pcmcia_mtd.c,v 1.7 2002-05-22 14:52:08 spse Exp $
  *
  * pcmcia_mtd.c - MTD driver for PCMCIA flash memory cards
  *
@@ -42,7 +42,7 @@ MODULE_PARM(pc_debug, "i");
 MODULE_LICENSE("GPL");
 #undef DEBUG
 #define DEBUG(n, args...) if (pc_debug>(n)) printk("pcmcia_mtd:" __FUNCTION__ "(): " args)
-static char *version ="pcmcia_mtd.c $Revision: 1.6 $";
+static char *version ="pcmcia_mtd.c $Revision: 1.7 $";
 #else
 #define DEBUG(n, args...)
 #endif
@@ -178,6 +178,7 @@ static void pcmcia_copy_from(struct map_info *map, void *to, unsigned long from,
 	DEBUG(2, "to = %p from = %lu len = %u\n", to, from, len);
 	while(len) {
 		int toread = 0x10000 - (from & 0xffff);
+		int tocpy;
 		if(toread > len) 
 			toread = len;
 
@@ -187,10 +188,41 @@ static void pcmcia_copy_from(struct map_info *map, void *to, unsigned long from,
 		if(remap_window(dev, win, from) == -1)
 			return;
 
-		memcpy_fromio(to, (dev->Base) + (from & 0xffff), toread);
-		len -= toread;
-		to += toread;
-		from += toread;
+		// Handle odd byte on 16bit bus
+		if((from & 1) && word_width) {
+			__u16 data;
+
+			DEBUG(2, "reading word from %p\n", dev->Base + (from & 0xfffe));
+			data = readw(dev->Base + (from & 0xfffe));
+			*(__u8 *)to = (__u8)(data >> 8);
+			to++;
+			from++;
+			len--;
+			toread--;
+		}
+		tocpy = toread;
+		if(word_width)
+			tocpy &= 0xfffe;
+
+		DEBUG(2, "memcpy from %p to %p len = %d\n", 
+		      dev->Base + (from & 0xfffe), to, tocpy);
+		memcpy_fromio(to, (dev->Base) + (from & 0xffff), tocpy);
+		len -= tocpy;
+		to += tocpy;
+		from += tocpy;
+
+		// Handle eben byte on 16bit bus
+		if(word_width && (toread & 1)) {
+			__u16 data;
+
+			DEBUG(2, "reading word from %p\n", dev->Base + (from & 0xfffe));
+			data = readw((dev->Base) + (from & 0xfffe));
+			*(__u8 *)to = (__u8)(data & 0xff);
+			to++;
+			from++;
+			toread--;
+			len--;
+		}			
 	}
 
 }
@@ -354,61 +386,9 @@ static void memory_detach(dev_link_t *link)
     
 } /* memory_detach */
 
-/*======================================================================
-
-Figure out the size of a simple SRAM card
-    
-======================================================================*/
 
 #define WIN_TYPE(a)  ((a) ? WIN_MEMORY_TYPE_AM : WIN_MEMORY_TYPE_CM)
 #define WIN_WIDTH(w) ((w) ? WIN_DATA_WIDTH_16 : WIN_DATA_WIDTH_8)
-#if 0
-static u_int get_size(dev_link_t *link, direct_dev_t *direct)
-{
-	modwin_t mod;
-	memreq_t mem;
-	u_char b0, b1;
-	int s, ret;
-
-	mod.Attributes = WIN_ENABLE | WIN_MEMORY_TYPE_CM;
-	mod.AccessSpeed = mem_speed;
-	ret = CardServices(ModifyWindow, link->win, &mod);
-	if (ret != CS_SUCCESS)
-		cs_error(link->handle, ModifyWindow, ret);
-
-	/* Look for wrap-around or dead end */
-	mem.Page = mem.CardOffset = 0;
-	CardServices(MapMemPage, link->win, &mem);
-	b0 = readb(direct->Base);
-	for (s = 12; s < 26; s++) {
-		mem.CardOffset = 1<<s;
-		CardServices(MapMemPage, link->win, &mem);
-		b1 = readb(direct->Base);
-		writeb(~b1, direct->Base);
-		mem.CardOffset = 0;
-		CardServices(MapMemPage, link->win, &mem);
-		if (readb(direct->Base) != b0) {
-			writeb(b0, direct->Base);
-			break;
-		}
-		mem.CardOffset = 1<<s;
-		CardServices(MapMemPage, link->win, &mem);
-		if (readb(direct->Base) != (0xff & ~b1)) break;
-		writeb(b1, direct->Base);
-	}
-
-	return (s > 15) ? (1<<s) : 0;
-} /* get_size */
-#endif
-static void print_size(u_int sz)
-{
-	if (sz & 0x03ff)
-		printk("%d bytes", sz);
-	else if (sz & 0x0fffff)
-		printk("%d kb", sz >> 10);
-	else
-		printk("%d mb", sz >> 20);
-}
 
 
 static void  dump_region(int num, region_info_t *region) 
@@ -443,6 +423,9 @@ static void memory_config(dev_link_t *link)
 	win_req_t req;
 	int nd, last_ret, last_fn, ret;
 	int i,j;
+
+	//static char *probes[] = { "jedec_probe", "cfi_probe", "sharp", "amd_flash", "jedec" };
+	static char *probes[] = { "jedec_probe", "sharp" };
 
 	mtd  = dev->mtd_info;
 	DEBUG(0, "memory_config(0x%p)\n", link);
@@ -519,28 +502,17 @@ static void memory_config(dev_link_t *link)
 	pcmcia_map.map_priv_1 = (unsigned long)dev;
 	pcmcia_map.map_priv_2 = (unsigned long)link->win;
 	DEBUG(1, "map_priv_1 = 0x%lx\n", pcmcia_map.map_priv_1);
-	DEBUG(1, "Trying jedec_probe\n");
-	mtd = do_map_probe("jedec_probe", &pcmcia_map);
-	if(!mtd) {
-		DEBUG(1, "FAILED: jedec_probe\n");
-		DEBUG(1, "Trying amd_flash\n");
-		mtd = do_map_probe("amd_flash", &pcmcia_map);
+
+	for(i = 0; i < sizeof(probes) / sizeof(char *); i++) {
+		DEBUG(1, "Trying %s\n", probes[i]);
+		mtd = do_map_probe(probes[i], &pcmcia_map);
+		if(mtd) 
+			break;
+	    
+		DEBUG(1, "FAILED: %s\n", probes[i]);
 	}
 
 	if(!mtd) {
-		DEBUG(1, "FAILED: amd_flash\n");
-		DEBUG(1, "Trying jedec");
-		mtd = do_map_probe("jedec", &pcmcia_map);
-	}
-
-	if(!mtd) {
-		DEBUG(1, "FAILED: jedec\n");
-		DEBUG(1, "Trying cfi_probe\n");
-		mtd = do_map_probe("cfi_probe", &pcmcia_map);
-	}
-
-	if(!mtd) {
-		DEBUG(1, "FAILED: cfi_probe\n");
 		DEBUG(1, "Cant find an MTD\n");
 		memory_release((u_long)link);
 		return;
