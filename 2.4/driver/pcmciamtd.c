@@ -1,7 +1,7 @@
 /*
- * $Id: pcmciamtd.c,v 1.22 2002-06-30 15:54:42 spse Exp $
+ * $Id: pcmciamtd.c,v 1.23 2002-06-30 16:05:31 spse Exp $
  *
- * pcmcia_mtd.c - MTD driver for PCMCIA flash memory cards
+ * pcmciamtd.c - MTD driver for PCMCIA flash memory cards
  *
  * Author: Simon Evans <spse@secret.org.uk>
  *
@@ -26,7 +26,7 @@
 
 #define CONFIG_MTD_DEBUG
 #define CONFIG_MTD_DEBUG_VERBOSE 2
-
+#undef CONFIG_MTD_DEBUG
 
 #ifdef CONFIG_MTD_DEBUG
 static int debug = CONFIG_MTD_DEBUG_VERBOSE;
@@ -49,7 +49,7 @@ static const int debug = 0;
 
 
 #define DRIVER_DESC	"PCMCIA Flash memory card driver"
-#define DRIVER_VERSION	"$Revision: 1.22 $"
+#define DRIVER_VERSION	"$Revision: 1.23 $"
 
 /* Size of the PCMCIA address space: 26 bits = 64 MB */
 #define MAX_PCMCIA_ADDR	0x4000000
@@ -72,7 +72,7 @@ typedef struct memory_dev_t {
 } memory_dev_t;
 
 
-static dev_info_t dev_info = "pcmcia_mtd";
+static dev_info_t dev_info = "pcmciamtd";
 static LIST_HEAD(dev_list);
 
 /* Module parameters */
@@ -743,19 +743,6 @@ static void memory_config(dev_link_t *link)
 	CS_CHECK(GetConfigurationInfo, link->handle, &t);
 	DEBUG(2, "Vcc = %d Vpp1 = %d Vpp2 = %d", t.Vcc, t.Vpp1, t.Vpp2);
 
-	/* Dump 256 bytes from card */
-	if(debug > 4) {
-		char *p = dev->win_base;
-		for(i = 0; i < 16; i++) {
-			printk(KERN_DEBUG "pcmcia_mtd: 0x%4.4x: ", i << 4);
-			for(j = 0; j < 16; j++) {
-				printk(KERN_DEBUG "0x%2.2x ", readb(p));
-				p += 1;
-			}
-			printk(KERN_DEBUG "\n");
-		}
-	}
-
 	link->dev = NULL;
 	link->state &= ~DEV_CONFIG_PENDING;
 
@@ -981,7 +968,7 @@ static dev_link_t *memory_attach(void)
 
 /*====================================================================*/
 
-static int __init init_pcmcia_mtd(void)
+static int __init init_pcmciamtd(void)
 {
 	servinfo_t serv;
 
@@ -1010,7 +997,7 @@ static int __init init_pcmcia_mtd(void)
 }
 
 
-static void __exit exit_pcmcia_mtd(void)
+static void __exit exit_pcmciamtd(void)
 {
 	struct list_head *temp1, *temp2;
 
@@ -1025,5 +1012,5 @@ static void __exit exit_pcmcia_mtd(void)
 	}
 }
 
-module_init(init_pcmcia_mtd);
-module_exit(exit_pcmcia_mtd);
+module_init(init_pcmciamtd);
+module_exit(exit_pcmciamtd);
