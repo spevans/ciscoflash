@@ -1,5 +1,5 @@
 /*
- * $Id: pcmciamtd.c,v 1.28 2002-07-11 12:02:33 spse Exp $
+ * $Id: pcmciamtd.c,v 1.29 2002-07-12 11:49:12 spse Exp $
  *
  * pcmciamtd.c - MTD driver for PCMCIA flash memory cards
  *
@@ -24,13 +24,10 @@
 
 #include <linux/mtd/map.h>
 
-#define CONFIG_MTD_DEBUG
-#define CONFIG_MTD_DEBUG_VERBOSE 2
-
 #ifdef CONFIG_MTD_DEBUG
 static int debug = CONFIG_MTD_DEBUG_VERBOSE;
 MODULE_PARM(debug, "i");
-MODULE_PARM_DESC(debug, "Set Debug Level 0 = quiet, 5 = noisy");
+MODULE_PARM_DESC(debug, "Set Debug Level 0=quiet, 5=noisy");
 #undef DEBUG
 #define DEBUG(n, format, arg...) \
 	if (n <= debug) {	 \
@@ -48,7 +45,7 @@ static const int debug = 0;
 
 
 #define DRIVER_DESC	"PCMCIA Flash memory card driver"
-#define DRIVER_VERSION	"$Revision: 1.28 $"
+#define DRIVER_VERSION	"$Revision: 1.29 $"
 
 /* Size of the PCMCIA address space: 26 bits = 64 MB */
 #define MAX_PCMCIA_ADDR	0x4000000
@@ -98,17 +95,17 @@ MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Simon Evans <spse@secret.org.uk>");
 MODULE_DESCRIPTION(DRIVER_DESC);
 MODULE_PARM(buswidth, "i");
-MODULE_PARM_DESC(buswidth, "Set buswidth (1 = 8 bit, 2 = 16 bit, default = 2)");
+MODULE_PARM_DESC(buswidth, "Set buswidth (1=8 bit, 2=16 bit, default=2)");
 MODULE_PARM(mem_speed, "i");
 MODULE_PARM_DESC(mem_speed, "Set memory access speed in ns");
 MODULE_PARM(force_size, "i");
 MODULE_PARM_DESC(force_size, "Force size of card in MB (1-64)");
 MODULE_PARM(vcc, "i");
-MODULE_PARM_DESC(vcc, "Set Vcc in 1/10ths eg 33 = 3.3V 120 = 12V (Dangerous)");
+MODULE_PARM_DESC(vcc, "Set Vcc in 1/10ths eg 33=3.3V 120=12V (Dangerous)");
 MODULE_PARM(vpp, "i");
-MODULE_PARM_DESC(vpp, "Set Vpp in 1/10ths eg 33 = 3.3V 120 = 12V (Dangerous)");
+MODULE_PARM_DESC(vpp, "Set Vpp in 1/10ths eg 33=3.3V 120=12V (Dangerous)");
 MODULE_PARM(mem_type, "i");
-MODULE_PARM_DESC(mem_type, "Set Memory type (0 = Flash, 1 = RAM, 2 = ROM, default = 0)");
+MODULE_PARM_DESC(mem_type, "Set Memory type (0=Flash, 1=RAM, 2=ROM, default=0)");
 
 
 
@@ -119,14 +116,12 @@ static void inline cs_error(client_handle_t handle, int func, int ret)
 }
 
 
-/* Map driver */
-
+/* read/write{8,16} copy_{from,to} routines with window remapping to access whole card */
 
 static caddr_t remap_window(struct map_info *map, unsigned long to)
 {
 	memory_dev_t *dev = (memory_dev_t *)map->map_priv_1;
 	window_handle_t win = (window_handle_t)map->map_priv_2;
-
 	memreq_t mrq;
 	int ret;
 
@@ -250,8 +245,7 @@ static void pcmcia_copy_to_remap(struct map_info *map, unsigned long to, const v
 }
 
 
-/* Non remap versions */
-
+/* read/write{8,16} copy_{from,to} routines with direct access */
 
 static u8 pcmcia_read8(struct map_info *map, unsigned long ofs)
 {
@@ -269,7 +263,7 @@ static u16 pcmcia_read16(struct map_info *map, unsigned long ofs)
 	caddr_t win_base = (caddr_t)map->map_priv_1;
 	u16 d;
 
-	d = readw(win_base +ofs);
+	d = readw(win_base + ofs);
 	DEBUG(3, "ofs = 0x%08lx (%p) data = 0x%04x", ofs, win_base + ofs, d);
 	return d;
 }
@@ -313,13 +307,10 @@ static void pcmcia_copy_to(struct map_info *map, unsigned long to, const void *f
 }
 
 
-/*======================================================================
-
-After a card is removed, pcmciamtd_release() will unregister the
-device, and release the PCMCIA configuration.  If the device is
-still open, this will be postponed until it is closed.
-
-======================================================================*/
+/* After a card is removed, pcmciamtd_release() will unregister the
+ * device, and release the PCMCIA configuration.  If the device is
+ * still open, this will be postponed until it is closed.
+ */
 
 static void pcmciamtd_release(u_long arg)
 {
@@ -485,13 +476,10 @@ static void card_settings(memory_dev_t *dev, dev_link_t *link, int *new_name)
 }
 
 
-/*======================================================================
-
-pcmciamtd_config() is scheduled to run after a CARD_INSERTION event
-is received, to configure the PCMCIA socket, and to make the
-MTD device available to the system.
-
-======================================================================*/
+/* pcmciamtd_config() is scheduled to run after a CARD_INSERTION event
+ * is received, to configure the PCMCIA socket, and to make the
+ * MTD device available to the system.
+ */
 
 #define CS_CHECK(fn, args...) \
 while ((last_ret=CardServices(last_fn=(fn), args))!=0) goto cs_failed
@@ -532,15 +520,12 @@ static void pcmciamtd_config(dev_link_t *link)
 	dev->pcmcia_map.write16 = pcmcia_write16_remap;
 	dev->pcmcia_map.copy_to = pcmcia_copy_to_remap;
 
-
-	/* Allocate a small memory window for direct access */
-	req.Attributes =  WIN_MEMORY_TYPE_CM | WIN_ENABLE;
-	req.Attributes |= (dev->pcmcia_map.buswidth == 1) ? WIN_DATA_WIDTH_8 : WIN_DATA_WIDTH_16;
-
 	/* Request a memory window for PCMCIA. Some architeures can map windows upto the maximum
 	   that PCMCIA can support (64Mb) - this is ideal and we aim for a window the size of the
 	   whole card - otherwise we try smaller windows until we succeed */
 
+	req.Attributes =  WIN_MEMORY_TYPE_CM | WIN_ENABLE;
+	req.Attributes |= (dev->pcmcia_map.buswidth == 1) ? WIN_DATA_WIDTH_8 : WIN_DATA_WIDTH_16;
 	req.Base = 0;
 	req.AccessSpeed = mem_speed;
 	link->win = (window_handle_t)link->handle;
@@ -699,14 +684,11 @@ static void pcmciamtd_config(dev_link_t *link)
 }
 
 
-/*======================================================================
-
-The card status event handler.  Mostly, this schedules other
-stuff to run after an event is received.  A CARD_REMOVAL event
-also sets some flags to discourage the driver from trying
-to talk to the card any more.
-
-======================================================================*/
+/* The card status event handler.  Mostly, this schedules other
+ * stuff to run after an event is received.  A CARD_REMOVAL event
+ * also sets some flags to discourage the driver from trying
+ * to talk to the card any more.
+ */
 
 static int pcmciamtd_event(event_t event, int priority,
 			event_callback_args_t *args)
@@ -749,14 +731,11 @@ static int pcmciamtd_event(event_t event, int priority,
 }
 
 
-/*======================================================================
-
-This deletes a driver "instance".  The device is de-registered
-with Card Services.  If it has been released, all local data
-structures are freed.  Otherwise, the structures will be freed
-when the device is released.
-
-======================================================================*/
+/* This deletes a driver "instance".  The device is de-registered
+ * with Card Services.  If it has been released, all local data
+ * structures are freed.  Otherwise, the structures will be freed
+ * when the device is released.
+ */
 
 static void pcmciamtd_detach(dev_link_t *link)
 {
@@ -806,13 +785,10 @@ static void pcmciamtd_detach(dev_link_t *link)
 }
 
 
-/*======================================================================
-
-pcmciamtd_attach() creates an "instance" of the driver, allocating
-local data structures for one device.  The device is registered
-with Card Services.
-
-======================================================================*/
+/* pcmciamtd_attach() creates an "instance" of the driver, allocating
+ * local data structures for one device.  The device is registered
+ * with Card Services.
+ */
 
 static dev_link_t *pcmciamtd_attach(void)
 {
@@ -859,8 +835,6 @@ static dev_link_t *pcmciamtd_attach(void)
 }
 
 
-/*====================================================================*/
-
 static int __init init_pcmciamtd(void)
 {
 	servinfo_t serv;
@@ -884,7 +858,6 @@ static int __init init_pcmciamtd(void)
 		info("bad mem_type (%d), using default", mem_type);
 		mem_type = 0;
 	}
-
 	register_pccard_driver(&dev_info, &pcmciamtd_attach, &pcmciamtd_detach);
 	return 0;
 }
