@@ -1,5 +1,5 @@
 /* 
- * $Id: pcmciamtd.c,v 1.7 2002-05-22 14:52:08 spse Exp $
+ * $Id: pcmciamtd.c,v 1.8 2002-05-22 15:30:55 spse Exp $
  *
  * pcmcia_mtd.c - MTD driver for PCMCIA flash memory cards
  *
@@ -42,7 +42,7 @@ MODULE_PARM(pc_debug, "i");
 MODULE_LICENSE("GPL");
 #undef DEBUG
 #define DEBUG(n, args...) if (pc_debug>(n)) printk("pcmcia_mtd:" __FUNCTION__ "(): " args)
-static char *version ="pcmcia_mtd.c $Revision: 1.7 $";
+static char *version ="pcmcia_mtd.c $Revision: 1.8 $";
 #else
 #define DEBUG(n, args...)
 #endif
@@ -211,7 +211,7 @@ static void pcmcia_copy_from(struct map_info *map, void *to, unsigned long from,
 		to += tocpy;
 		from += tocpy;
 
-		// Handle eben byte on 16bit bus
+		// Handle even byte on 16bit bus
 		if(word_width && (toread & 1)) {
 			__u16 data;
 
@@ -264,6 +264,7 @@ void pcmcia_copy_to(struct map_info *map, unsigned long to, const void *from, ss
 	DEBUG(2, "to = %lu from = %p len = %u\n", to, from, len);
 	while(len) {
 		int towrite = 0x10000 - (to & 0xffff);
+		int tocpy;
 		if(towrite > len) 
 			towrite = len;
 
@@ -273,10 +274,48 @@ void pcmcia_copy_to(struct map_info *map, unsigned long to, const void *from, ss
 		if(remap_window(dev, win, to) == -1)
 			return;
 
-		memcpy_toio((dev->Base) + (to & 0xffff), from, towrite);
-		len -= towrite;
-		to += towrite;
-		from += towrite;
+		// Handle odd byte on 16bit bus
+		if((to & 1) && word_width) {
+			__u16 data;
+
+			DEBUG(2, "writing word to %p\n", dev->Base + (to & 0xfffe));
+			data = readw(dev->Base + (to & 0xfffe));
+			data &= 0x00ff;
+			data |= *(__u8 *)from << 8;
+			writew(data, (dev->Base) + (to & 0xfffe));
+			to++;
+			from++;
+			len--;
+			towrite--;
+		}
+
+		tocpy = towrite;
+		if(word_width)
+			tocpy &= 0xfffe;
+
+
+		DEBUG(2, "memcpy from %p to %p len = %d\n", 
+		      from, dev->Base + (to & 0xfffe), tocpy);
+		memcpy_toio((dev->Base) + (to & 0xffff), from, tocpy);
+		len -= tocpy;
+		to += tocpy;
+		from += tocpy;
+
+		// Handle even byte on 16bit bus
+		if(word_width && (towrite & 1)) {
+			__u16 data;
+
+			DEBUG(2, "writing word to %p\n", dev->Base + (to & 0xfffe));
+			data = readw((dev->Base) + (to & 0xfffe));
+			data &= 0xff00;
+			data |= *(__u8 *)from;
+			writew(data, (dev->Base) + (to & 0xfffe));
+			to++;
+			from++;
+			towrite--;
+			len--;
+		}	
+
 	}
 }
 
