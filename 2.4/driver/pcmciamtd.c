@@ -1,5 +1,5 @@
 /* 
- * $Id: pcmciamtd.c,v 1.3 2002-05-20 14:02:03 spse Exp $
+ * $Id: pcmciamtd.c,v 1.4 2002-05-21 00:08:05 spse Exp $
  *
  * pcmcia_mtd.c - MTD driver for PCMCIA flash memory cards
  *
@@ -35,13 +35,14 @@
 
 #define PCMCIA_DEBUG
 
+
 #ifdef PCMCIA_DEBUG
-static int pc_debug = 3;
+static int pc_debug = 1;
 MODULE_PARM(pc_debug, "i");
 MODULE_LICENSE("GPL");
 #undef DEBUG
 #define DEBUG(n, args...) if (pc_debug>(n)) printk("pcmcia_mtd:" __FUNCTION__ "(): " args)
-static char *version ="pcmcia_mtd.c $Revision: 1.3 $";
+static char *version ="pcmcia_mtd.c $Revision: 1.4 $";
 #else
 #define DEBUG(n, args...)
 #endif
@@ -175,13 +176,6 @@ static __u16 pcmcia_read16(struct map_info *map, unsigned long ofs)
 }
 
 
-static __u32 pcmcia_read32(struct map_info *map, unsigned long ofs)
-{
-	DEBUG(2, "ofs = 0x%8.8lx\n", ofs);
-	return 0;
-}
-
-
 static void pcmcia_copy_from(struct map_info *map, void *to, unsigned long from, ssize_t len)
 {
 	memory_dev_t *dev = (memory_dev_t *)map->map_priv_1;
@@ -204,7 +198,7 @@ static void pcmcia_copy_from(struct map_info *map, void *to, unsigned long from,
 			DEBUG(1, "cant mapmempage ret = %d\n", ret);
 			return;
 		}
-		memcpy(to, (dev->direct.Base) + (from & 0xffff), toread);
+		memcpy_fromio(to, (dev->direct.Base) + (from & 0xffff), toread);
 		len -= toread;
 		to += toread;
 		from += toread;
@@ -231,7 +225,7 @@ void pcmcia_write8(struct map_info *map, __u8 d, unsigned long adr)
 
 	DEBUG(2, "adr = 0x%08lx (%p)  data = 0x%02x\n", adr, 
 	      (dev->direct.Base)+(adr & 0xffff), d);
-	writew(d, (dev->direct.Base)+(adr & 0xffff));
+	writeb(d, (dev->direct.Base)+(adr & 0xffff));
 }
 
 
@@ -256,12 +250,6 @@ void pcmcia_write16(struct map_info *map, __u16 d, unsigned long adr)
 }
 
 
-void pcmcia_write32(struct map_info *map, __u32 d, unsigned long adr)
-{
-	DEBUG(2, "adr = 0x%8.8lx d = 0x%8.8x\n", adr, d);
-}
-
-
 void pcmcia_copy_to(struct map_info *map, unsigned long to, const void *from, ssize_t len)
 {
 	memory_dev_t *dev = (memory_dev_t *)map->map_priv_1;
@@ -283,7 +271,7 @@ void pcmcia_copy_to(struct map_info *map, unsigned long to, const void *from, ss
 			DEBUG(1, "cant mapmempage ret = %d\n", ret);
 			return;
 		}
-		memcpy((dev->direct.Base) + (to & 0xffff), from, towrite);
+		memcpy_toio((dev->direct.Base) + (to & 0xffff), from, towrite);
 		len -= towrite;
 		to += towrite;
 		from += towrite;
@@ -297,11 +285,9 @@ struct map_info pcmcia_map = {
 	buswidth:  2,
 	read8:     pcmcia_read8,
 	read16:    pcmcia_read16,
-	read32:    pcmcia_read32,
 	copy_from: pcmcia_copy_from,
 	write8:    pcmcia_write8,
 	write16:   pcmcia_write16,
-	write32:   pcmcia_write32,
 	copy_to:   pcmcia_copy_to
 };
   
@@ -518,12 +504,12 @@ static void memory_config(dev_link_t *link)
 	dev->direct.cardsize = 0;
 
 	/* Dump 256 bytes from card */
-	if(pc_debug) {
+	if(pc_debug > 4) {
 		char *p = dev->direct.Base;
 		for(i = 0; i < 16; i++) {
 			printk("memory_mtd: 0x%4.4x: ", i << 4);
 			for(j = 0; j < 16; j++)
-				printk("0x%2.2x ", *(p++) & 0xff);
+				printk("0x%2.2x ", readb(p));
 			printk("\n");
 		}
 	}
