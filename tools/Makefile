@@ -1,6 +1,6 @@
-# $Id: Makefile,v 1.6 2002-07-11 12:37:06 spse Exp $
+# $Id: Makefile,v 1.7 2002-09-30 01:06:41 spse Exp $
 
-VERSION := 0.05
+VERSION := 0.06
 CFLAGS := -Wall -O2
 
 INSTALL = /usr/bin/install -c
