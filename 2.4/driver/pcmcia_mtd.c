@@ -1,5 +1,5 @@
 /* 
- * $Id: pcmcia_mtd.c,v 1.4 2002-05-21 00:08:05 spse Exp $
+ * $Id: pcmcia_mtd.c,v 1.5 2002-05-21 11:25:19 spse Exp $
  *
  * pcmcia_mtd.c - MTD driver for PCMCIA flash memory cards
  *
@@ -42,7 +42,7 @@ MODULE_PARM(pc_debug, "i");
 MODULE_LICENSE("GPL");
 #undef DEBUG
 #define DEBUG(n, args...) if (pc_debug>(n)) printk("pcmcia_mtd:" __FUNCTION__ "(): " args)
-static char *version ="pcmcia_mtd.c $Revision: 1.4 $";
+static char *version ="pcmcia_mtd.c $Revision: 1.5 $";
 #else
 #define DEBUG(n, args...)
 #endif
@@ -60,9 +60,13 @@ static int mem_speed = 0;
 /* Force the size of an SRAM card */
 static int force_size = 0;
 
+/* Force buswidth */
+static int buswidth = 0;
+
 MODULE_PARM(word_width, "i");
 MODULE_PARM(mem_speed, "i");
 MODULE_PARM(force_size, "i");
+MODULE_PARM(buswidth, "i");
 
 /*====================================================================*/
 
@@ -486,7 +490,19 @@ static void memory_config(dev_link_t *link)
     
 	/* Allocate a small memory window for direct access */
 	//req.Attributes = WIN_DATA_WIDTH_8 | WIN_ENABLE;
-	req.Attributes = WIN_DATA_WIDTH_16 | WIN_MEMORY_TYPE_CM | WIN_ENABLE;
+	if(!word_width) {
+		req.Attributes = WIN_DATA_WIDTH_8 | WIN_MEMORY_TYPE_CM | WIN_ENABLE;
+		pcmcia_map.buswidth = 1;
+	} else {
+		req.Attributes = WIN_DATA_WIDTH_16 | WIN_MEMORY_TYPE_CM | WIN_ENABLE;
+	}
+	if(buswidth) {
+		pcmcia_map.buswidth = buswidth;
+	}
+	if(force_size) {
+		pcmcia_map.size = force_size << 20;
+		DEBUG(1, "size forced to %dM\n", force_size);
+	}
 	req.Base = 0;
 	req.Size = 0x10000;
 	req.AccessSpeed = 0;
@@ -545,25 +561,25 @@ static void memory_config(dev_link_t *link)
 	DEBUG(1, "Trying jedec_probe\n");
 	mtd = do_map_probe("jedec_probe", &pcmcia_map);
 	if(!mtd) {
-		DEBUG(1, "FAILED: jedec\n");
+		DEBUG(1, "FAILED: jedec_probe\n");
 		DEBUG(1, "Trying amd_flash\n");
 		mtd = do_map_probe("amd_flash", &pcmcia_map);
 	}
+
 	if(!mtd) {
 		DEBUG(1, "FAILED: amd_flash\n");
+		DEBUG(1, "Trying jedec");
+		mtd = do_map_probe("jedec", &pcmcia_map);
+	}
+
+	if(!mtd) {
+		DEBUG(1, "FAILED: jedec\n");
 		DEBUG(1, "Trying cfi_probe\n");
 		mtd = do_map_probe("cfi_probe", &pcmcia_map);
 	}
 
 	if(!mtd) {
 		DEBUG(1, "FAILED: cfi_probe\n");
-		DEBUG(1, "Trying cfi\n");
-		mtd = do_map_probe("cfi", &pcmcia_map);
-	}
-
-
-	if(!mtd) {
-		DEBUG(1, "FAILED: cfi\n");
 		DEBUG(1, "Cant find an MTD\n");
 		memory_release((u_long)link);
 		return;
