@@ -196,6 +196,13 @@ int read_header(int fd, struct cffs_hdr *header)
 }
 
 
+int put_file(int fd, char *fname, uint32_t magic)
+{
+	/* create the header */
+	return 0;
+}
+
+
 int get_file(char *buf, int len, struct cffs_hdr *header)
 {
 	char *name = header->magic == CISCO_FH_MAGIC ? header->hdr.cfh.name : header->hdr.ecfh.name;
@@ -225,14 +232,14 @@ int get_file(char *buf, int len, struct cffs_hdr *header)
 
 int delete_file(int fd, struct cffs_hdr *header)
 {
-	uint32_t flag;
+	uint16_t flag;
 	off_t pos;
 
 	if(header->magic == CISCO_FH_MAGIC) {
 		if(!(header->hdr.cfh.flags &= ~FLAG_DELETED))
 			return 0;
 		header->hdr.cfh.flags &= ~FLAG_DELETED;
-		flag = htonl(header->hdr.cfh.flags);
+		flag = htons(header->hdr.cfh.flags);
 		pos = header->pos + 10;
 	} else {
 		return -1;
@@ -241,7 +248,10 @@ int delete_file(int fd, struct cffs_hdr *header)
 		perror("lseek: ");
 		return -1;
 	}
-	write(fd, &flag, sizeof(flag));
+	if(write(fd, &flag, sizeof(flag)) == -1) {
+		perror("write: ");
+		return -1;
+	}
 	
 	if(lseek(fd, header->pos, SEEK_SET) == -1) {
 		perror("lseek: ");
