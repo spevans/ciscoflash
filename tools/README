@@ -1,0 +1,20 @@
+cffs - Cisco Flash File System tool
+
+Copyright (C) 2002 Simon Evans (spse@secret.org.uk)
+
+License: GPL
+
+Build
+
+% make
+
+usage:
+
+If the flash device is /dev/mtd/0:
+
+% cffs /dev/mtd/0 --dir
+
+for more information:
+% cffs --help
+
+
