@@ -1,3 +1,10 @@
+/*
+ * $Id: cffs.c,v 1.12 2002-07-04 12:37:57 spse Exp $
+ *
+ *
+ */
+
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -129,6 +136,25 @@ char *read_file(int fd, struct cffs_hdr *header, int *filelen)
 }
 
 
+int seek_next_header(int fd)
+{
+	off_t pos;
+
+	pos = lseek(fd, 0, SEEK_CUR);
+	if(pos == -1) {
+		perror("lseek");
+		return -1;
+	}
+
+	pos = (pos + 3) & ~3;
+	if(lseek(fd, pos, SEEK_SET) == -1) {
+		perror("lseek");
+		return -1;
+	}
+	return 0;
+}
+
+
 int next_header_pos(int fd, struct cffs_hdr *header)
 {
 	off_t newpos = 0;
@@ -167,6 +193,7 @@ int read_header(int fd, struct cffs_hdr *header)
 		if(read(fd, buf+4, len) < len)
 			return -1;
 
+		header->hdr.cfh.magic = header->magic;
 		header->hdr.cfh.length = ntohl(*(uint32_t *)(buf+4));
 		header->hdr.cfh.chksum = ntohs(*(uint16_t *)(buf+8));
 		header->hdr.cfh.flags = ntohs(*(uint16_t *)(buf+10));
@@ -179,6 +206,7 @@ int read_header(int fd, struct cffs_hdr *header)
 		if(read(fd, buf+4, len) < len)
 			return -1;
 
+		header->hdr.ecfh.magic = header->magic;
 		header->hdr.ecfh.filenum = ntohl(*(uint32_t *)(buf+4));
 		strncpy(header->hdr.cfh.name, buf+8, 64);
 		header->hdr.cfh.name[63] = '\0';			
@@ -196,10 +224,114 @@ int read_header(int fd, struct cffs_hdr *header)
 }
 
 
+int write_header(int fd, struct cffs_hdr *header)
+{
+	char buf[sizeof(struct cffs_hdr)];
+	int len;
+
+	memset(buf, 0, sizeof(struct cffs_hdr));
+
+	if(header->magic == CISCO_FH_MAGIC) {
+		len = sizeof(ciscoflash_filehdr);
+		*(uint32_t *)(buf) = htonl(header->hdr.cfh.magic);
+		*(uint32_t *)(buf+4) = htonl(header->hdr.cfh.length);
+		*(uint16_t *)(buf+8) = htons(header->hdr.cfh.chksum);
+		*(uint16_t *)(buf+10) = htons(header->hdr.cfh.flags);
+		*(uint32_t *)(buf+12) = htonl(header->hdr.cfh.length);
+		memcpy(buf+16, header->hdr.cfh.name, 48);
+	} 
+	else if(header->magic == CISCO_FH_EXT_MAGIC) {
+	}
+	else return -1;
+		
+	if(lseek(fd, header->pos, SEEK_SET) == -1) {
+		perror("lseek: ");
+		return -1;
+	}
+	if(write(fd, &buf, len) != len) {
+		perror("write: ");
+		return -1;
+	}
+
+	return 0;
+}
+		
+
+
+
 int put_file(int fd, char *fname, uint32_t magic)
 {
-	/* create the header */
+	struct stat sinfo;
+	int fd2 = -1;
+	char *file = NULL;
+	struct cffs_hdr header;
+
+
+	header.magic = magic;
+	header.pos = lseek(fd, 0, SEEK_CUR);
+	if(header.pos == -1) {
+		perror("lseek: ");
+		return -1;
+	}
+
+	/* open the file */
+	fd2 = open(fname, O_RDONLY);
+	if(fd2 == -1) {
+		fprintf(stderr, "Cant open %s: %s\n", fname, strerror(errno));
+		return -1;
+	}
+
+	if(fstat(fd2, &sinfo) == -1) {
+		fprintf(stderr, "Cant stat %s: %s\n", fname, strerror(errno));
+		close(fd2);
+		return -1;
+	}
+	
+	/* read it in */
+	file = malloc(sinfo.st_size);
+	if(!file) {
+		goto put_err;
+	}
+
+	if(read(fd2, file, sinfo.st_size) != sinfo.st_size) {
+		fprintf(stderr, "Cant read in all of file %s\n", fname);
+		goto put_err;
+	}
+	close(fd2);
+
+	if(magic == CISCO_FH_MAGIC) {
+		time_t now;
+		header.hdr.cfh.magic = magic;
+		header.hdr.cfh.length = sinfo.st_size;
+		header.hdr.cfh.chksum = calc_chk16(file, sinfo.st_size);
+		header.hdr.cfh.flags = 0xFFFF;
+		time(&now);
+		header.hdr.cfh.date = now;
+		memset(header.hdr.cfh.name, 0, 48);
+		strncpy(header.hdr.cfh.name, fname, 48);
+		header.hdr.cfh.name[47] = '\0';
+	} else {
+		return -1;
+	}
+
+	if(write_header(fd, &header) == -1)
+		goto put_err;
+
+	if(write(fd, file, sinfo.st_size) != sinfo.st_size) {
+		perror("write: ");
+		goto put_err;
+	}
+
+	close(fd2);
 	return 0;
+
+
+ put_err:
+	if(fd2 != -1)
+		close(fd2);
+	if(file)
+		free(file);
+	return -1;
 }
 
 
@@ -534,6 +666,21 @@ int main(int argc, char **argv)
 				goto error;
 		}
 	}
+
+	
+	if(options == put) {
+		if(lseek(fd, -4, SEEK_CUR) == -1) {
+			perror("lseek");
+			goto error;
+		}
+		while(filecnt--) {
+			printf("Adding file: %s\n", *(files));
+			put_file(fd, *(files++), CISCO_FH_MAGIC);
+			if(seek_next_header(fd) == -1)
+				goto error;
+		}
+	}
+
 
 	close(fd);
 	exit(0);
