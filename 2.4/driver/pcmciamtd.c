@@ -1,5 +1,5 @@
 /* 
- * $Id: pcmciamtd.c,v 1.8 2002-05-22 15:30:55 spse Exp $
+ * $Id: pcmciamtd.c,v 1.9 2002-05-25 01:19:31 spse Exp $
  *
  * pcmcia_mtd.c - MTD driver for PCMCIA flash memory cards
  *
@@ -42,7 +42,7 @@ MODULE_PARM(pc_debug, "i");
 MODULE_LICENSE("GPL");
 #undef DEBUG
 #define DEBUG(n, args...) if (pc_debug>(n)) printk("pcmcia_mtd:" __FUNCTION__ "(): " args)
-static char *version ="pcmcia_mtd.c $Revision: 1.8 $";
+static char *version ="pcmcia_mtd.c $Revision: 1.9 $";
 #else
 #define DEBUG(n, args...)
 #endif
@@ -63,10 +63,18 @@ static int force_size = 0;
 /* Force buswidth */
 static int buswidth = 0;
 
+/* Force Vcc */
+static int vcc = 0;
+/* Force Vpp */
+static int vpp = 0;
+
 MODULE_PARM(word_width, "i");
 MODULE_PARM(mem_speed, "i");
 MODULE_PARM(force_size, "i");
 MODULE_PARM(buswidth, "i");
+MODULE_PARM(vcc, "i");
+MODULE_PARM(vpp, "i");
+
 
 /*====================================================================*/
 
@@ -462,9 +470,12 @@ static void memory_config(dev_link_t *link)
 	win_req_t req;
 	int nd, last_ret, last_fn, ret;
 	int i,j;
+	config_info_t t;
+	config_req_t r;
+
 
 	//static char *probes[] = { "jedec_probe", "cfi_probe", "sharp", "amd_flash", "jedec" };
-	static char *probes[] = { "jedec_probe", "sharp" };
+	static char *probes[] = { "sharp_probe", "jedec_probe" };
 
 	mtd  = dev->mtd_info;
 	DEBUG(0, "memory_config(0x%p)\n", link);
@@ -517,7 +528,33 @@ static void memory_config(dev_link_t *link)
 			printk("\n");
 		}
 	}
-				   
+
+	DEBUG(1, "Getting configuration\n");
+	CS_CHECK(GetConfigurationInfo, link->handle, &t);
+	DEBUG(1, "Vcc = %d Vpp1 = %d Vpp2 = %d\n", t.Vcc, t.Vpp1, t.Vpp2);
+	
+	r.Attributes = 0;
+	r.Vcc = (vcc) ? (vcc * 10) : t.Vcc;
+	r.Vpp1 = (vpp) ? (vpp * 10) : t.Vpp1;
+	r.Vpp2 = (vpp) ? (vpp * 10) : t.Vpp2;
+	
+	r.IntType = INT_MEMORY;
+	r.ConfigBase = t.ConfigBase;
+	r.Status = t.Status;
+	r.Pin = t.Pin;
+	r.Copy = t.Copy;
+	r.ExtStatus = t.ExtStatus;
+	r.ConfigIndex = 0;
+	r.Present = t.Present;
+	DEBUG(1, "Setting Configuration\n");
+	CS_CHECK(RequestConfiguration, link->handle ,&r);
+	
+	DEBUG(1, "Getting configuration\n");
+	CS_CHECK(GetConfigurationInfo, link->handle, &t);
+	DEBUG(1, "Vcc = %d Vpp1 = %d Vpp2 = %d\n", t.Vcc, t.Vpp1, t.Vpp2);
+
+
+	DEBUG(1, "Looking for card regions\n");
 	for(i = 0; i < 2; i++) {
 		region.Attributes = i ? REGION_TYPE_AM : REGION_TYPE_CM;
 		ret = CardServices(GetFirstRegion, link->handle, &region);
@@ -530,14 +567,20 @@ static void memory_config(dev_link_t *link)
 			      region.BlockSize, region.PartMultiple, region.JedecMfr, region.JedecInfo);
 		}
 	}
+	DEBUG(1, "Card regions done\n");
     
+#if 0
+	req.Attributes &= ~WIN_MEMORY_TYPE_AM;
+	req.Attributes |= WIN_MEMORY_TYPE_CM;
+	CS_CHECK(ModifyWindow, link->win, &req);
+#endif
+
 	link->dev = NULL;
 	link->state &= ~DEV_CONFIG_PENDING;
     
 	/* Setup the mtd_info struct */
 
 
-#if 1
 	pcmcia_map.map_priv_1 = (unsigned long)dev;
 	pcmcia_map.map_priv_2 = (unsigned long)link->win;
 	DEBUG(1, "map_priv_1 = 0x%lx\n", pcmcia_map.map_priv_1);
@@ -559,25 +602,6 @@ static void memory_config(dev_link_t *link)
 
 	dev->mtd_info = mtd;
 	mtd->module = THIS_MODULE;
-#endif    
-
-#if 0
-	mtd->type = MTD_RAM;
-	mtd->flags = MTD_CAP_RAM;
-	mtd->size = 16<<20;
-	mtd->erasesize = 64<<10;
-	mtd->name = dev->mtd_name;
-	strcpy(mtd->name, "PCMCIA Memory card");
-	mtd->numeraseregions = 0;
-	mtd->eraseregions = NULL;
-	mtd->erase = mtd_erase;
-	mtd->read = mtd_read;
-	mtd->write = mtd_write;
-	mtd->priv = dev;
-	mtd->module = THIS_MODULE;			
-#endif
-
-
 
 #ifdef CISTPL_FORMAT_MEM
 	/* This is a hack, not a complete solution */
@@ -614,17 +638,16 @@ static void memory_config(dev_link_t *link)
 					DEBUG(1, "memory_mtd: Region %d, size = %u bytes\n", i, t->dev[i].size);
 				}
 			}
-#if 0
+#if 1
 			if(tuple.TupleCode == CISTPL_VERS_1) {
 				cistpl_vers_1_t *t = &parse.version_1;
 				int i;
 				if(t->ns) {
-					mtd->name[0] = '\0';
 					for(i = 0; i < t->ns; i++) {
-						strcat(mtd->name, t->str+t->ofs[i]);
-						strcat(mtd->name, " ");
+						DEBUG(1, "%s ", t->str+t->ofs[i]);
 					}
 				}
+				DEBUG(1, "\n");
 			}
 #endif
 			if(tuple.TupleCode == CISTPL_JEDEC_C) {
@@ -678,8 +701,7 @@ static void memory_config(dev_link_t *link)
 				printk(" %s", attr ? "attribute" : "common");
 			for (i = 0; i < nr[attr]; i++) {
 				printk(" ");
-				print_size(minor[i].region.RegionSize);
-			}
+				print_size(minor[i].region.RegionSize);			}
 		}
 	}
 	printk("\n");
