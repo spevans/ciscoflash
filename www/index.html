@@ -1,0 +1,74 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+  <head>
+    <title>Linux MTD driver for PCMCIA Flash cards</title>
+  </head>
+
+  <body>
+    <h1>Linux MTD driver for PCMCIA Flash cards</h1>
+	This driver allow linear mapped Flash, RAM and ROM based PCMCIA cards to be used under Linux 
+	as MTD devices. It only works with 8 & 16 bit cards (ISA) and not 32bit Cardbus cards.
+	<p>
+	The driver simply maps out the address space of the card and then tries each of the MTD
+	chip probe routines in sequence until it finds a device it understands.
+	<p>
+	<b>NOTE</b> Currently this driver is very alpha software, so please use with caution!
+
+	<h3>Setup</h3>
+	Checkout the latest MTD CVS source tree, apply the latest PCMCIA MTD patch (below)
+	and then patch the MTD tree into your Linux source tree.
+	The MTD CVS tree instructions can be found at <a href="http://linux-mtd.infradead.org">
+	linux-mtd.infradead.org</a>
+
+	To patch the MTD tree into you linux source tree:
+	<code>
+	cd mtd<br>
+	patch -p1 &lt patch-pcmciamtd.diff<br>
+	cd patches<br>
+	sh patchin.sh /path/to/linux/src<br>
+	</code>
+	<p>
+	Then in the Linux kernel configuration under the MTD menu, select 'Mapping drivers for chip access'
+	and select 'PCMCIA MTD driver' and select the chip drivers as required in the
+	'RAM/ROM/Flash chip drivers' section.<br>
+	NOTE. The PCMCIA MTD driver has only been tested as a module, so it best to compile it as so.
+	<p>
+	Rebuild and install the modules etc then edit your /etc/pcmcia/config file to add the following:<br>
+	<code>
+	device "pcmcia_mtd"<br>
+	  class "memory" module "pcmcia_mtd"<br>
+	</code>
+	<p>
+	And for each card type you have bind it to pcmcia_mtd, eg:<br>
+	<code>
+#<br>
+# Memory cards<br>
+#<br>
+card "Anonymous Memory"<br>
+  anonymous<br>
+  bind "pcmcia_mtd"<br>
+<br>
+card "Memory Card"<br>
+  function memory_card<br>
+  bind "pcmcia_mtd"<br>
+<br>
+card "IBM 2MB SRAM"<br>
+  version "IBM", "2MB SRAM"<br>
+  bind "pcmcia_mtd"<br>
+
+	</code>
+	<p>
+	and then restart cardmgr.
+	<p>
+
+
+	<a href="patch-cvsmtd.diff">patch-cvsmtd.diff</a>
+	<a href="patch-cvsmtd.diffstat">(diffstat)</a>
+    <hr>
+    <address><a href="mailto:spse@secret.org.uk">Simon Evans</a></address>
+<!-- Created: Sat Jun  1 17:33:13 BST 2002 -->
+<!-- hhmts start -->
+Last modified: Sat Jun  1 19:16:14 BST 2002
+<!-- hhmts end -->
+  </body>
+</html>
