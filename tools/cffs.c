@@ -26,7 +26,7 @@
 
 
 #define VERSION "0.01"
-
+#define COPYRIGHT "(C) Simon Evans 2002 (spse@secret.org.uk)"
 
 enum options {	none = 0, bad_options, dir, delete, erase, get, put, fsck, help, version };
 	
@@ -75,6 +75,25 @@ int file_match(int filecnt, char **files, struct cffs_hdr *header)
 	}
 	return 1;
 }
+
+int confirm_action(char *action)
+{
+	int ch;
+
+	if(action) {
+		printf("Proceed with %s [Y/n]", action);
+		fflush(stdout);
+	}
+	fflush(stdin);
+	ch = getchar();
+	fflush(stdin);
+	if(ch == 'Y' || ch == 'y' || ch == '\n')
+		return 1;
+	if(action)
+		printf("%s aborted\n", action);
+	return 0;
+}
+	
 
 
 char *read_file(int fd, struct cffs_hdr *header, int *filelen) 
@@ -177,6 +196,33 @@ int read_header(int fd, struct cffs_hdr *header)
 }
 
 
+int get_file(char *buf, int len, struct cffs_hdr *header)
+{
+	char *name = header->magic == CISCO_FH_MAGIC ? header->hdr.cfh.name : header->hdr.ecfh.name;
+	int fd;
+	
+	/* note - racy */
+	if(!access(name, F_OK)) {
+		printf("File %s exists, overwrite? [Y/n]", name);
+		fflush(stdout);
+		if(!confirm_action(NULL))
+			return 0;
+	}
+	fd = open(name, O_CREAT | O_TRUNC | O_RDWR, 0600);
+	if(fd == -1) {
+		fprintf(stderr, "Error opening %s for writing, %s\n", name, strerror(errno));
+		return -1;
+	}
+	if(write(fd, buf, len) == -1) {
+		fprintf(stderr, "Error writing to %s, %s\n", name, strerror(errno));
+		close(fd);
+		return -1;
+	}
+	close(fd);
+	return 0;
+}
+
+
 int delete_file(int fd, struct cffs_hdr *header)
 {
 	uint32_t flag;
@@ -245,19 +291,6 @@ void dump_header_ext(ciscoflash_filehdr_ext *h)
 }
 
 
-int confirm_action(char *action)
-{
-	int ch;
-	printf("Proceed with %s [Y/n]", action);
-	fflush(stdout);
-	ch = getchar();
-	if(ch == 'Y' || ch == 'y' || ch == '\n')
-		return 1;
-	printf("\n%s aborted\n", action);
-	return 0;
-}
-	
-
 int erase_device(int fd)
 {
 	int blocks, cnt;
@@ -296,9 +329,9 @@ int erase_device(int fd)
 void usage()
 {
 	printf("cffs - cisco flash file system reader\n");
-	printf("Version " VERSION "\n");
+	printf("Version " VERSION "  " COPYRIGHT"\n");
 	printf("Usage: cffs <device> <option> [files...]\n");
-	printf("\t-l, --dir\t\tList files\n");
+	printf("\t-l, --dir\tList files\n");
 	printf("\t-d, --delete\tDelete files\n");
 	printf("\t-e, --erase\tErase flash\n");
 	printf("\t-g, --get\tGet files from flash\n");
@@ -319,9 +352,10 @@ enum options parse_opts(int argc, char **argv, char **device, int *filecnt, char
 		{"put",		no_argument, NULL, 'p'},
 		{"fsck",	no_argument, NULL, 'f'},
 		{"help",	no_argument, NULL, 'h'},
+		{"version",	no_argument, NULL, 'v'},
 		{0, 0, 0, 0}
 	};
-	static char *short_opts = "+ldegpf";
+	static char *short_opts = "+ldegpfhv";
 	int a;
 	enum options option = none;
 
@@ -433,7 +467,7 @@ int main(int argc, char **argv)
 		exit(1);
 		
 	case version:
-		printf("cffs version " VERSION "\n");
+		printf("cffs version " VERSION "  " COPYRIGHT "\n");
 		exit(1);
 		
 	case none:
@@ -467,11 +501,18 @@ int main(int argc, char **argv)
 				continue;
 			}
 			if(!file_match(filecnt, files, &header)) {
-				if(options == dir) {
+				if(options == dir || options == get) {
 					p = read_file(fd, &header, &len);
 					if(!p)
 						goto error;
-					dump_header(&header, calc_chk16(p, len));
+					if(options == dir) {
+						dump_header(&header, calc_chk16(p, len));
+					} else {
+						if(get_file(p, len, &header) == -1) {
+							free(p);
+							goto error;
+						}
+					}
 					free(p);
 				}
 				if(options == delete) {
@@ -479,8 +520,6 @@ int main(int argc, char **argv)
 						goto error;
 				}
 			}
-
-
 			if(next_header_pos(fd, &header) == -1)
 				goto error;
 		}
