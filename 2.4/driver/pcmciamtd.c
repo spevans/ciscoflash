@@ -1,5 +1,5 @@
 /*
- * $Id: pcmciamtd.c,v 1.26 2002-07-10 17:53:30 spse Exp $
+ * $Id: pcmciamtd.c,v 1.27 2002-07-11 11:01:39 spse Exp $
  *
  * pcmciamtd.c - MTD driver for PCMCIA flash memory cards
  *
@@ -48,7 +48,7 @@ static const int debug = 0;
 
 
 #define DRIVER_DESC	"PCMCIA Flash memory card driver"
-#define DRIVER_VERSION	"$Revision: 1.26 $"
+#define DRIVER_VERSION	"$Revision: 1.27 $"
 
 /* Size of the PCMCIA address space: 26 bits = 64 MB */
 #define MAX_PCMCIA_ADDR	0x4000000
@@ -493,11 +493,13 @@ static void card_settings(memory_dev_t *dev, dev_link_t *link, int *new_name)
 	tuple_t tuple;
 	cisparse_t parse;
 	u_char buf[64];
+
 	tuple.Attributes = 0;
 	tuple.TupleData = (cisdata_t *)buf;
 	tuple.TupleDataMax = sizeof(buf);
 	tuple.TupleOffset = 0;
 	tuple.DesiredTuple = RETURN_FIRST_TUPLE;
+
 	rc = CardServices(GetFirstTuple, link->handle, &tuple);
 	while(rc == CS_SUCCESS) {
 		rc = CardServices(GetTupleData, link->handle, &tuple);
@@ -523,7 +525,7 @@ static void card_settings(memory_dev_t *dev, dev_link_t *link, int *new_name)
 		case CISTPL_DEVICE: {
 			cistpl_device_t *t = &parse.device;
 			int i;
-			DEBUG(1, "Common memory:");
+			DEBUG(2, "Common memory:");
 			dev->pcmcia_map.size = t->dev[0].size;
 			for(i = 0; i < t->ndev; i++) {
 				DEBUG(2, "Region %d, type = %u", i, t->dev[i].type);
@@ -574,7 +576,7 @@ static void card_settings(memory_dev_t *dev, dev_link_t *link, int *new_name)
 		}
 			
 		default:
-			DEBUG(1, "Unknown tuple code %d", tuple.TupleCode);
+			DEBUG(2, "Unknown tuple code %d", tuple.TupleCode);
 		}
 		
 		rc = CardServices(GetNextTuple, link->handle, &tuple, &parse);
@@ -629,7 +631,6 @@ static void pcmciamtd_config(dev_link_t *link)
 	int ret;
 	int i;
 	config_info_t t;
-	config_req_t r;
 	static const char *probes[] = { "jedec_probe", "cfi_probe" };
 	cisinfo_t cisinfo;
 	int new_name = 0;
@@ -646,7 +647,6 @@ static void pcmciamtd_config(dev_link_t *link)
 	} else {
 		DEBUG(2, "ValidateCIS found %d chains", cisinfo.Chains);
 	}
-
 
 	card_settings(dev, link, &new_name);
 
@@ -701,7 +701,7 @@ static void pcmciamtd_config(dev_link_t *link)
 		
 	/* Get write protect status */
 	CS_CHECK(GetStatus, link->handle, &status);
-	DEBUG(1, "status value: 0x%x", status.CardState);
+	DEBUG(2, "status value: 0x%x", status.CardState);
 	DEBUG(2, "Window handle = 0x%8.8lx", (unsigned long)link->win);
 	dev->win_base = ioremap(req.Base, req.Size);
 	if(!dev->win_base) {
@@ -721,25 +721,28 @@ static void pcmciamtd_config(dev_link_t *link)
 	CS_CHECK(GetConfigurationInfo, link->handle, &t);
 	DEBUG(2, "Vcc = %d Vpp1 = %d Vpp2 = %d", t.Vcc, t.Vpp1, t.Vpp2);
 	
-	r.Attributes = 0;
-	r.Vcc = (vcc) ? vcc : t.Vcc;
-	r.Vpp1 = (vpp) ? vpp : t.Vpp1;
-	r.Vpp2 = (vpp) ? vpp : t.Vpp2;
+	link->conf.Attributes = 0;
+	link->conf.Vcc = (vcc) ? vcc : t.Vcc;
+	link->conf.Vpp1 = (vpp) ? vpp : t.Vpp1;
+	link->conf.Vpp2 = (vpp) ? vpp : t.Vpp2;
 	
-	r.IntType = INT_MEMORY;
-	r.ConfigBase = t.ConfigBase;
-	r.Status = t.Status;
-	r.Pin = t.Pin;
-	r.Copy = t.Copy;
-	r.ExtStatus = t.ExtStatus;
-	r.ConfigIndex = 0;
-	r.Present = t.Present;
+	link->conf.IntType = INT_MEMORY;
+	link->conf.ConfigBase = t.ConfigBase;
+	link->conf.Status = t.Status;
+	link->conf.Pin = t.Pin;
+	link->conf.Copy = t.Copy;
+	link->conf.ExtStatus = t.ExtStatus;
+	link->conf.ConfigIndex = 0;
+	link->conf.Present = t.Present;
 	DEBUG(2, "Setting Configuration");
-	CS_CHECK(RequestConfiguration, link->handle ,&r);
-	
-	DEBUG(2, "Getting configuration");
-	CS_CHECK(GetConfigurationInfo, link->handle, &t);
-	DEBUG(2, "Vcc = %d Vpp1 = %d Vpp2 = %d", t.Vcc, t.Vpp1, t.Vpp2);
+	ret = CardServices(RequestConfiguration, link->handle, &link->conf);
+	if(ret != CS_SUCCESS) {
+		cs_error(link->handle, RequestConfiguration, ret);
+	} else {
+		DEBUG(2, "Getting configuration");
+		CS_CHECK(GetConfigurationInfo, link->handle, &t);
+		DEBUG(2, "Vcc = %d Vpp1 = %d Vpp2 = %d", t.Vcc, t.Vpp1, t.Vpp2);
+	}
 
 	link->dev = NULL;
 	link->state &= ~DEV_CONFIG_PENDING;
