@@ -1,6 +1,25 @@
 /*
- * $Id: cffs.c,v 1.15 2002-07-04 15:23:29 spse Exp $
+ * $Id: cffs.c,v 1.16 2002-07-04 16:29:21 spse Exp $
  *
+ * cffs - cisco flash filesystem tool
+ *
+ * Copyright (C) 2002 Simon Evans (spse@secret.org.uk)
+ *
+ * This program is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU General Public License
+ * as published by the Free Software Foundation; either version 2
+ * of the License, or (at your option) any later version.
+ * 
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ * 
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+ *
+ * Please see the file COPYING for more details
  *
  */
 
@@ -225,7 +244,7 @@ int read_header(int fd, struct cffs_hdr *header)
 int write_header(int fd, struct cffs_hdr *header)
 {
 	char buf[sizeof(struct cffs_hdr)];
-	int len;
+	int len = 0;
 
 	memset(buf, 0, sizeof(struct cffs_hdr));
 
@@ -411,13 +430,9 @@ void dump_header(struct cffs_hdr *header, uint16_t chk)
 	else
 		strcpy(timebuf, "  <no date> ");
 
-	   
 	printf("%10d %s [%4.4X] [%4.4X] %s %s %s\n", h->length, timebuf, h->chksum, h->flags, h->name,
 	       !(h->flags & FLAG_DELETED) ? "[deleted]" : "",
 	       (chk != h->chksum) ? "[bad chksum]" : "");
-	//printf("magic: 0x%8.8X length: %u chk: 0x%4.4X flags: 0x%4.4X\n",
-	//       h->magic, h->length, (uint16_t)h->chksum, (uint16_t)h->flags);
-	//printf("date: %s name: %s\n", ctime(&t), h->name);
 }
 
 
@@ -479,6 +494,7 @@ void usage()
 	printf("cffs - cisco flash file system reader\n");
 	printf("Version " VERSION "  " COPYRIGHT"\n");
 	printf("Usage: cffs <device> <option> [files...]\n");
+	printf("\t<device>\tMTD Char device (eg /dev/mtd/0)\n");
 	printf("\t-l, --dir\tList files\n");
 	printf("\t-d, --delete\tDelete files\n");
 	printf("\t-e, --erase\tErase flash\n");
