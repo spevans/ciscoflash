@@ -177,6 +177,40 @@ int read_header(int fd, struct cffs_hdr *header)
 }
 
 
+int delete_file(int fd, struct cffs_hdr *header)
+{
+	uint32_t flag;
+	off_t pos;
+
+	if(header->magic == CISCO_FH_MAGIC) {
+		if(!(header->hdr.cfh.flags &= ~FLAG_DELETED))
+			return 0;
+		header->hdr.cfh.flags &= ~FLAG_DELETED;
+		flag = htonl(header->hdr.cfh.flags);
+		pos = header->pos + 10;
+	} else {
+		return -1;
+	}
+	if(lseek(fd, pos, SEEK_SET) == -1) {
+		perror("lseek: ");
+		return -1;
+	}
+	write(fd, &flag, sizeof(flag));
+	
+	if(lseek(fd, header->pos, SEEK_SET) == -1) {
+		perror("lseek: ");
+		return -1;
+	}
+	if(read_header(fd, header) == -1)
+		return -1;
+
+	if(!(header->hdr.cfh.flags &= ~FLAG_DELETED))
+		return 0;
+	return -1;
+}
+
+
+
 void dump_header(struct cffs_hdr *header, uint16_t chk)
 {
 	ciscoflash_filehdr *h = &header->hdr.cfh;
@@ -411,7 +445,7 @@ int main(int argc, char **argv)
 	}
 		
 
-	fd = open(device, O_RDONLY);
+	fd = open(device, O_RDWR);
 	if(fd == -1) {
 		fprintf(stderr, "Bad device %s: %s\n", device, strerror(errno));
 		exit(1);
@@ -432,12 +466,21 @@ int main(int argc, char **argv)
 				eof = 1;
 				continue;
 			}
-			p = read_file(fd, &header, &len);
-			if(!p)
-				goto error;
-			if(!file_match(filecnt, files, &header))
-				dump_header(&header, calc_chk16(p, len));
-			free(p);
+			if(!file_match(filecnt, files, &header)) {
+				if(options == dir) {
+					p = read_file(fd, &header, &len);
+					if(!p)
+						goto error;
+					dump_header(&header, calc_chk16(p, len));
+					free(p);
+				}
+				if(options == delete) {
+					if(delete_file(fd, &header) == -1)
+						goto error;
+				}
+			}
+
+
 			if(next_header_pos(fd, &header) == -1)
 				goto error;
 		}
