@@ -40,25 +40,22 @@
     <p>
       And for each card type you have bind it to <code>pcmciamtd</code> (by default they are
       bound to <code>memory_cs</code>) eg:
-    <p>
-      <code>
+<pre>
+#
+# Memory cards
+#
+card "Anonymous Memory"
+  anonymous
+  bind "pcmciamtd"
 
-#<br>
-# Memory cards<br>
-#<br>
-card "Anonymous Memory"<br>
-  anonymous<br>
-  bind "pcmciamtd"<br>
-<br>
-card "Memory Card"<br>
-  function memory_card<br>
-  bind "pcmciamtd"<br>
-<br>
-card "IBM 2MB SRAM"<br>
-  version "IBM", "2MB SRAM"<br>
-  bind "pcmciamtd"<br>
+card "Memory Card"
+  function memory_card
+  bind "pcmciamtd"
 
-</code>
+card "IBM 2MB SRAM"
+  version "IBM", "2MB SRAM"
+  bind "pcmciamtd"
+</pre>
     <p>
       and then restart cardmgr.
     <p>
@@ -75,14 +72,14 @@ card "IBM 2MB SRAM"<br>
 	<tr><td>buswidth</td><td>Set buswidth (1 = 8 bit, 2 = 16 bit, default = 2)</td></tr>
 	<tr><td>mem_speed</td><td>Set memory access speed in ns</td></tr>
 	<tr><td>force_size</td><td>Force size of card in MB (1-64 default = 64)</td></tr>
-	<tr><td>vcc</td><td>Set Vcc in 1/10ths eg 33 = 3.3V 120 = 12V (Dangerous)</td></tr>
 	<tr><td>vpp</td><td>Set Vpp in 1/10ths eg 33 = 3.3V 120 = 12V (Dangerous)</td></tr>
+	<tr><td>setvpp</td><td>Set Vpp (0=Never, 1=On writes, 2=Always on, default=0)</td></tr>
 	<tr><td>mem_type</td><td>Set Memory type (0 = Flash, 1 = RAM, 2 = ROM, default = 0)</td></tr>
 	<tr><td>debug</td><td>Debug level 0 - 5 (default = MTD debug)</td></tr>
     </table>
     <p>
       <code>buswidth</code> sets the memory window into 8 or 16bit mode. By default it uses
-      16bit mode, however the correct usage is dependant on the cards hardware.
+      16bit mode, however the correct usage is dependant on the card's hardware.
     <p>
       <code>memspeed</code> sets the access speed of the memory in nanoseconds. This option
       should not be needed unless the card doesnt work with the default.
@@ -91,14 +88,22 @@ card "IBM 2MB SRAM"<br>
       determined from the CIS. The probe routine looks for flash chips in this area and 
       may find a smaller flash memory area than was set with <code>force_size.</code>
     <p>
-      <code>vcc, vpp</code> set the Vcc and Vpp used to power the card optionally for
+      <code>vpp</code> set the Vpp used to power the card optionally for
       programming the card during write and erase. This is very card specific and some
-      cards can require different Vcc and Vpp voltages. This can be apparent if the card
-      can be read, but not written or erased. Currently the only way to find out the required
+      cards can require different Vpp voltages. This can be apparent if the card
+      can be read, but not be written or erased. Currently the only way to find out the required
       voltages is to enable debugging in the probe routines and see the model numbers of the
-      chips that are found. The voltages are set in 1/10ths of a volt so to set Vcc to 5.0
-      volts, use <code>vcc=50</code>. <b>These options can damage hardware if voltages are
-      incorrectly set!</b>
+      chips that are found. The voltages are set in 1/10ths of a volt so to set Vpp to 5.0
+      volts, use <code>vpp=50</code>. <b>This option can damage hardware if voltages are
+      incorrectly set!
+    <p>
+      <code>setvpp</code> enables setting of Vpp. Not all flash chips require Vpp whilst others
+      do. <code>setvpp</code> allows three modes: 0 sets the Vpp to 0 volts permanently, 1 enables
+      the <code>set_vpp()</code>function to be called everytime the chip driver wants to write to
+      the chip to set the Vpp on and off and 2 sets the Vpp on permanently. Enabling the
+      <code>set_vpp()</code> can slow down writes quite considerably as every write requires a PCMCIA
+      subsystem call to set the Vpp on and off. However not all flash chips require or want the Vpp
+      to be enabled permanently.
     <p>
       <code>mem_type</code> sets the probe routines to call. 0 will use the <i>jedec_probe</i>
       and <i>cfi_probe</i>. This probe can fail if no supported flash chips are found. Using
@@ -112,14 +117,13 @@ card "IBM 2MB SRAM"<br>
       If this works then please report this as a bug (include as much information as possible
       about the hardware).
     <p>
-      Patch against 2.4.19-rc1<br>
-      <a href="patch-2.4.19-rc1-pcmciamtd-2.diff">patch-2.4.19-rc1-pcmciamtd-2.diff</a>
-      <a href="patch-2.4.19-rc1-pcmciamtd-2.diffstat">(diffstat)</a>
+      Patch against 2.4.19<br>
+      <a href="patch-2.4.19-pcmciamtd.diff">patch-2.4.19-pcmciamtd.diff</a>
     <hr>
     <address><a href="mailto:spse@secret.org.uk">Simon Evans</a></address>
 <!-- Created: Sat Jun  1 17:33:13 BST 2002 -->
 <!-- hhmts start -->
-Last modified: Thu Jul 11 13:22:57 BST 2002
+Last modified: Sun Aug  4 00:22:49 BST 2002
 <!-- hhmts end -->
   </body>
 </html>
