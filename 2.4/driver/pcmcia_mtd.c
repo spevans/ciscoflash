@@ -1,5 +1,5 @@
 /*
- * $Id: pcmcia_mtd.c,v 1.17 2002-05-27 16:05:07 spse Exp $
+ * $Id: pcmcia_mtd.c,v 1.18 2002-06-05 16:39:45 spse Exp $
  *
  * pcmcia_mtd.c - MTD driver for PCMCIA flash memory cards
  *
@@ -49,7 +49,7 @@ static const int debug = 0;
 
 
 #define DRIVER_DESC	"PCMCIA Flash memory card driver"
-#define DRIVER_VERSION	"$Revision: 1.17 $"
+#define DRIVER_VERSION	"$Revision: 1.18 $"
 /* Maximum number of separate memory devices we'll allow */
 #define MAX_DEV		4
 
@@ -524,20 +524,24 @@ static void memory_detach(dev_link_t *link)
 	memory_dev_t *dev = link->priv;
 
 	DEBUG(3, "memory_detach(0x%p)", link);
-#if 0
-	if (link->state & DEV_CONFIG) {
-		memory_release((u_long)link);
-		if (link->state & DEV_STALE_CONFIG) {
-			link->state |= DEV_STALE_LINK;
-			return;
-		}
+	if(!dev) {
+		DEBUG(3, "dev is NULL");
+		return;
 	}
-#endif
+
+	if (link->state & DEV_CONFIG) {
+		DEBUG(3, "DEV_CONFIG set");
+		link->state |= DEV_STALE_LINK;
+		return;
+	}
+
 	if (link->handle)
 		CardServices(DeregisterClient, link->handle);
-	return;
-	/* Unlink device structure, free bits */
+	DEBUG(3, "Freeing dev (%p)", dev);
 	kfree(dev);
+	link->priv = NULL;
+	/* Unlink device structure, free bits */
+
 }
 
 
@@ -562,7 +566,7 @@ static void memory_config(dev_link_t *link)
 	int i,j;
 	config_info_t t;
 	config_req_t r;
-	static const char *probes[] = { "sharp_probe", "jedec_probe", "cfi_probe" };
+	static const char *probes[] = { "jedec_probe", "cfi_probe" };
 
 	DEBUG(3, "memory_config(0x%p)", link);
 
@@ -851,13 +855,13 @@ static void memory_release(u_long arg)
 	memory_dev_t *dev = link->priv;
 	DEBUG(3, "memory_release(0x%p)", link);
 
-	del_mtd_device(dev->mtd_info);
-	link->dev = NULL;
-
-	if (link->win) {
-		iounmap(dev->win_base);
-		DEBUG(2, "ReleaseWindow() called");
-		CardServices(ReleaseWindow, link->win);
+	if(dev) {
+		del_mtd_device(dev->mtd_info);
+		if (link->win) {
+			iounmap(dev->win_base);
+			DEBUG(2, "ReleaseWindow() called");
+			CardServices(ReleaseWindow, link->win);
+		}
 	}
 	link->state &= ~DEV_CONFIG;
 	if (link->state & DEV_STALE_LINK)
