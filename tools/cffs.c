@@ -1,5 +1,5 @@
 /*
- * $Id: cffs.c,v 1.18 2002-07-07 14:39:19 spse Exp $
+ * $Id: cffs.c,v 1.19 2002-08-03 15:55:54 spse Exp $
  *
  * cffs - cisco flash filesystem tool
  *
@@ -510,7 +510,7 @@ int erase_device(int fd)
 		printf("\rErasing block %6d/%d", cnt+1, blocks);
 		fflush(stdout);
 		if(ioctl(fd, MEMERASE, &erase) == -1) {
-			fprintf(stderr, "erase failed\n");
+			fprintf(stderr, "\nerase failed: %s\n", strerror(errno));
 			return -1;
 		} 
 		erase.start += mtd.erasesize;
@@ -773,7 +773,7 @@ int main(int argc, char **argv)
 
 	fd = open(device, mode);
 	if(fd == -1) {
-		fprintf(stderr, "Bad device %s: %s\n", device, strerror(errno));
+		fprintf(stderr, "Cant open %s: %s\n", device, strerror(errno));
 		exit(1);
 	}
 	if(fstat(fd, &sinfo) == -1) {
