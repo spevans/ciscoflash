@@ -1,5 +1,5 @@
 /* 
- * $Id: pcmciamtd.c,v 1.10 2002-05-25 07:55:55 spse Exp $
+ * $Id: pcmciamtd.c,v 1.11 2002-05-25 23:44:37 spse Exp $
  *
  * pcmcia_mtd.c - MTD driver for PCMCIA flash memory cards
  *
@@ -42,7 +42,7 @@ MODULE_PARM(pc_debug, "i");
 MODULE_LICENSE("GPL");
 #undef DEBUG
 #define DEBUG(n, args...) if (pc_debug>(n)) printk("pcmcia_mtd:" __FUNCTION__ "(): " args)
-static char *version ="pcmcia_mtd.c $Revision: 1.10 $";
+static char *version ="pcmcia_mtd.c $Revision: 1.11 $";
 #else
 #define DEBUG(n, args...)
 #endif
@@ -114,6 +114,7 @@ static void memory_detach(dev_link_t *);
 typedef struct memory_dev_t {
 	dev_link_t		link;
 	struct mtd_info       *mtd_info;
+	char		mtd_name[sizeof(struct cistpl_vers_1_t)];
 	caddr_t		Base;		/* ioremapped address of PCMCIA window */	
 	u_int		Size;		/* size of window (usually 64K) */
 	u_int		cardsize;	/* size of whole card */
@@ -339,7 +340,6 @@ void pcmcia_copy_to(struct map_info *map, unsigned long to, const void *from, ss
 
 
 struct map_info pcmcia_map = {
-	name:      "PCMCIA Memory card",
 	size:      16<<20,
 	buswidth:  2,
 	read8:     pcmcia_read8,
@@ -595,11 +595,14 @@ static void memory_config(dev_link_t *link)
 
 	pcmcia_map.map_priv_1 = (unsigned long)dev;
 	pcmcia_map.map_priv_2 = (unsigned long)link->win;
+	pcmcia_map.name = dev->mtd_name;
+	strcpy(dev->mtd_name, "PCMCIA Memory card");
+
 	DEBUG(1, "map_priv_1 = 0x%lx\n", pcmcia_map.map_priv_1);
 
 	if(rom) {
 		mtd = do_map_probe("map_rom", &pcmcia_map);
-	} els if(ram) {
+	} else if(ram) {
 		mtd = do_map_probe("map_ram", &pcmcia_map);
 	} else {
 		for(i = 0; i < sizeof(probes) / sizeof(char *); i++) {
@@ -661,8 +664,11 @@ static void memory_config(dev_link_t *link)
 				cistpl_vers_1_t *t = &parse.version_1;
 				int i;
 				if(t->ns) {
+					mtd->name[0] = '\0';
 					for(i = 0; i < t->ns; i++) {
-						DEBUG(1, "%s ", t->str+t->ofs[i]);
+						if(i)
+							strcat(mtd->name, " ");
+						strcat(mtd->name, t->str+t->ofs[i]);
 					}
 				}
 				DEBUG(1, "\n");
